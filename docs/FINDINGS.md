@@ -26,6 +26,14 @@ its own, independent of whether the model solved anything. Solved-status and pro
 were never separated in this design, so the finding could not distinguish "the model solved
 it" from "the prompt was longer."
 
+**A second, more basic problem, worth naming separately from the confound:** Phase 0's
+conclusion was drawn from a single solved-task instance versus three failed ones. Even set
+aside the length confound entirely — n=1 for the "solved" condition cannot support a general
+claim about how successful algorithmic behavior relates to attention dynamics. This is why
+Phase C1 moved to 5 independently-seeded instances per task type (17 solved, 12–13 failed
+after grouping) and a proper Mann-Whitney U test — the original conclusion wasn't just
+confounded, it was underpowered to begin with.
+
 This finding was presented at the 3rd Doctoral Symposium 2026, NIIT University in April 2026 before the confound
 below was identified; the poster is archived at `docs/historical_results/` for traceability
 and should not be read as the project's current conclusion.
@@ -40,7 +48,7 @@ status. These variants are part of the current Phase C1 task set.
 ## Bug #1 — Answer-matching scorer
 
 The function responsible for judging whether the model's generated output counts as
-"solved" had a scoring bug where padding spaces or single-token generation mismatch edge cases led to incorrect evaluations — found and fixed during this phase. (See `test_answer_matching.py`
+"solved" had a scoring bug — found and fixed during this phase. (See `test_answer_matching.py`
 for the regression tests covering the specific cases this bug touched: bare integer answers,
 single-token answers, and multi-token answers.)
 
@@ -118,7 +126,7 @@ same-task-different-outcome variance is itself informative.
 
 ## Related work
 
-- Olsson et al. (2022) — In-Context Learning and Induction Heads
-- Vig (2019) — BertViz
-- Edelman et al. (2024) — Staged In-Context Learning
-- Singh et al. (2024) — Function Vector Heads
+- Olsson et al. (2022) — "In-context Learning and Induction Heads"
+- Vig (2019) — BertViz, a multiscale attention visualization tool
+- Edelman et al. (2024) — "The Evolution of Statistical Induction Heads: In-Context Learning Markov Chains" (NeurIPS 2024)
+- Todd et al. (2024) — "Function Vectors in Large Language Models" (ICLR 2024)

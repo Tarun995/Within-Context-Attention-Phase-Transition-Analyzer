@@ -121,10 +121,10 @@ properties, answer-matching regression cases, and statistical direction-labeling
 
 ## Related work
 
-- Olsson et al. (2022) — In-Context Learning and Induction Heads
-- Vig (2019) — BertViz
-- Edelman et al. (2024) — Staged In-Context Learning
-- Singh et al. (2024) — Function Vector Heads
+- Olsson et al. (2022) — "In-context Learning and Induction Heads"
+- Vig (2019) — BertViz, a multiscale attention visualization tool
+- Edelman et al. (2024) — "The Evolution of Statistical Induction Heads: In-Context Learning Markov Chains" (NeurIPS 2024)
+- Todd et al. (2024) — "Function Vectors in Large Language Models" (ICLR 2024)
 
 ## License
 
