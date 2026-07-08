@@ -1,0 +1,22 @@
+# configs/phase_c1.yaml
+# Phase C1 experiment — statistically powered test of solved vs failed task separation
+# Runs n_instances independently-seeded tasks per type, then Mann-Whitney U test
+# with Bonferroni correction across all metrics.
+
+model_name: "gpt2"
+mode: "phase_c1"
+layer_idx: -1
+
+base_seed: 42
+target_tokens: 504
+n_instances: 5
+
+stat_metrics:
+  - "plateau_onset_fraction"
+  - "post_plateau_var"
+  - "entropy_rise_rate"
+
+alpha: 0.05
+output_dir: "results"
+save_plots: true
+verbose: true

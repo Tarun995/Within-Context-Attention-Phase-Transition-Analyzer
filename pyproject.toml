@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attn-phase"
+version = "0.1.0"
+description = "A pipeline for detecting and rigorously testing within-context attention dynamics in transformer models."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "transformers>=4.35",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+attn-phase = "attn_phase.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
