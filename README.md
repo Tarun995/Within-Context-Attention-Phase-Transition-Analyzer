@@ -1,18 +1,17 @@
 # Within-Context Attention Phase Transition Analyzer
 
-A statistical testing tool for a specific mechanistic-interpretability question: **does a
-frozen transformer's attention behave measurably differently, within a single forward pass,
-when it solves a task versus when it fails one?**
+A hypothesis-testing pipeline for one question: **does a frozen transformer's attention
+behave measurably differently, within a single forward pass, when it solves a task versus
+when it fails one?**
 
-This isn't a visualization tool — it's a hypothesis-testing pipeline. It generates matched
-synthetic tasks, runs them through a HuggingFace causal LM, extracts attention-derived
-metrics per token position, and runs a properly powered, multiple-comparisons-corrected
-statistical test comparing solved vs. failed task instances.
+It generates matched synthetic tasks, runs them through a HuggingFace causal LM, extracts
+attention-derived metrics per token position, and runs a Bonferroni-corrected statistical
+test comparing solved vs. failed instances.
 
 ## Headline result (GPT-2 small, Phase C1)
 
-Across 30 task instances (5 seeds × 6 task types, matched for prompt length where relevant),
-one of three tested metrics separates solved from failed tasks after Bonferroni correction:
+Across 30 task instances (5 seeds × 6 task types), one of three tested metrics separates
+solved from failed tasks after correction:
 
 | Metric | n(solved) | n(failed) | mean(solved) | mean(failed) | p (corrected) | effect size r | Result |
 |---|---|---|---|---|---|---|---|
@@ -20,31 +19,27 @@ one of three tested metrics separates solved from failed tasks after Bonferroni 
 | plateau_onset_fraction | 17 | 13 | 0.4062 | 0.4738 | 1.000 | 0.186 | No effect |
 | entropy_rise_rate | 17 | 13 | 0.0096 | 0.0106 | 1.000 | 0.140 | No effect |
 
-**Reading it correctly:** solved tasks show *higher* post-plateau attention-entropy variance
-than failed tasks — the model doesn't settle into a quieter, more stable attention pattern
-when it succeeds. It keeps attention more dynamic and oscillatory. One plausible reading:
-this reflects actively sustained pattern-matching/retrieval circuits, rather than the model
-"locking in" a static state once it has the answer. The other two tested metrics show no
-significant separation — that's reported honestly, not dropped.
+**Reading it:** solved tasks show higher post-plateau attention-entropy variance than failed
+ones — attention stays dynamic rather than settling into a quieter state. One plausible
+reading is sustained retrieval/pattern-matching circuits rather than a static "locked-in"
+state once the answer is found. The other two metrics show no significant effect; that's
+reported honestly rather than dropped.
 
 ![Main Finding](plots/hero_finding.png)
 
-See [`docs/FINDINGS.md`](docs/FINDINGS.md) for the full narrative: the original (confounded)
-finding, the two methodology bugs that were found and fixed, a third bug in the statistics
-code that initially reported the *direction of this exact result backwards*, and how each
-was caught.
+Full narrative — the original confounded finding, two methodology bugs, and a stats bug that
+initially reported this result's direction backwards — is in [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
-## How I know this result is real, not a fluke
+## Why this result should be trusted
 
-- Bonferroni correction applied across all 3 tested metrics — this is not a single lucky
-  comparison. It's also what caught an *earlier* false positive at layer 10 in a full
-  layer-sweep (1 of 24 comparisons), which did not survive correction and was correctly
-  discarded.
-- Effect size (rank-biserial r = -0.549) reported alongside p-value, not instead of it —
-  a medium-to-large effect, not a borderline one.
-- The raw per-task values were pulled and hand-verified against the printed statistics
-  table before this result was trusted (see FINDINGS.md, "Bug #3").
-- Multi-seed (5 instances per task type), not single-instance anecdote.
+- Bonferroni-corrected across all 3 tested metrics, not a single lucky comparison. The same
+  correction discarded an earlier false positive at layer 10 in a full layer sweep (1 of 24
+  comparisons).
+- Effect size (rank-biserial r = -0.549) reported alongside p — medium-to-large, not
+  borderline.
+- Raw per-task values hand-verified against the printed table before trusting the result
+  (see FINDINGS.md, Bug #3).
+- 5 seeded instances per task type, not a single-run anecdote.
 
 ## Install
 
@@ -60,20 +55,18 @@ pip install -e .
 attn-phase run --config configs/phase_c1.yaml
 ```
 
-This loads GPT-2, builds 30 tasks across 6 task types (5 seeded instances each), runs the
-forward passes, computes attention-derived metrics, saves a curves plot and a results JSON
-to `results/`, and prints the Mann-Whitney U statistical table shown above.
+Loads GPT-2, builds 30 tasks across 6 task types (5 seeded instances each), runs the forward
+passes, computes attention-derived metrics, and saves a curves plot plus a results JSON to
+`results/`. Prints the Mann-Whitney U table shown above.
 
-## Using a different model or task set
-
-Point the CLI at a different config file, or override flags directly:
+## Different model or tasks
 
 ```bash
 attn-phase run --model gpt2-medium --layers 0-12 --seeds 5 --tasks all
 ```
 
-Any HuggingFace causal LM name is accepted. See `configs/phase_c1.yaml` for the full set of
-configurable fields (model, seed, target token length, layer range, task types).
+Any HuggingFace causal LM name works. See `configs/phase_c1.yaml` for all configurable
+fields (model, seed, target token length, layer range, task types).
 
 ## Repository structure
 
@@ -105,25 +98,26 @@ python -m pytest tests/ -v
 ```
 
 55+ tests cover task generation, metric correctness on synthetic curves with known
-properties, answer-matching regression cases, and statistical direction-labeling
-(added specifically after Bug #3 — see FINDINGS.md).
+properties, answer-matching regression cases, and statistical direction-labeling (added
+after Bug #3 — see FINDINGS.md).
 
 ## Limitations
 
-- Single model tested end-to-end so far (GPT-2 small, 117M params); the CLI supports any
-  HuggingFace causal LM but larger-model results are not yet reported.
+- Single model tested end-to-end (GPT-2 small, 117M); the CLI supports any HuggingFace
+  causal LM, but larger-model results aren't reported yet.
 - CPU-only run shown; not benchmarked for GPU throughput.
 - One base seed (42) with 5 derived instances per task type — broader seed coverage is
   planned (see Future Work in FINDINGS.md).
-- The `mod_arith_m10_d1` task type appears in *both* the solved and failed groups across
-  different seed instances — the reported separation is partly at the instance level, not
-  purely between task types. See FINDINGS.md for detail.
+- `mod_arith_m10_d1` appears in both the solved and failed groups across different seed
+  instances — the reported separation is partly at the instance level, not purely between
+  task types. See FINDINGS.md for detail.
 
 ## Related work
 
 - Olsson et al. (2022) — "In-context Learning and Induction Heads"
 - Vig (2019) — BertViz, a multiscale attention visualization tool
-- Edelman et al. (2024) — "The Evolution of Statistical Induction Heads: In-Context Learning Markov Chains" (NeurIPS 2024)
+- Edelman et al. (2024) — "The Evolution of Statistical Induction Heads: In-Context Learning
+  Markov Chains" (NeurIPS 2024)
 - Todd et al. (2024) — "Function Vectors in Large Language Models" (ICLR 2024)
 
 ## License
