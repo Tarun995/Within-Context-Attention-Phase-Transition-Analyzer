@@ -1,5 +1,9 @@
 # Within-Context Attention Phase Transition Analyzer
 
+**[Live dashboard →](https://within-context-attention-phase-tran.vercel.app/)** — interactive
+view of the headline finding, the full research notebook (including the bugs found along the
+way), and a panel for exploring your own `results.json` from a local run.
+
 A statistical testing tool for a specific mechanistic-interpretability question: **does a
 frozen transformer's attention behave measurably differently, within a single forward pass,
 when it solves a task versus when it fails one?**
@@ -30,7 +34,8 @@ metrics show no significant separation — reported honestly, not dropped.
 
 See [`docs/FINDINGS.md`](docs/FINDINGS.md) for the full narrative: the original (confounded)
 finding, the two methodology bugs found and fixed, and a third bug in the statistics code
-that initially reported this exact result's direction backwards.
+that initially reported this exact result's direction backwards. The same story is laid out
+interactively in the **Notebook** tab of the [live dashboard](https://within-context-attention-phase-tran.vercel.app/).
 
 ## Why this result can be trusted
 
@@ -67,12 +72,18 @@ attn-phase run --model gpt2-medium --layers 0-12 --seeds 5 --tasks all
 Any HuggingFace causal LM name is accepted — see `configs/phase_c1.yaml` for the full set of
 configurable fields.
 
+Drop the `results.json` this produces into the **Run** tab of the
+[live dashboard](https://within-context-attention-phase-tran.vercel.app/) to explore it —
+task-by-task tables, a solved-vs-failed scatter plot, and the corrected statistical tests,
+rendered from your own run.
+
 ## Repository structure
 
 ```
 attention-phase-analyzer/
     pyproject.toml
     configs/phase_c1.yaml
+    dashboard/                       # source for the live dashboard (Vite + React)
     src/attn_phase/
         tasks.py        # synthetic task generation, multi-seed wrapper
         metrics.py       # attention entropy, plateau detection, oscillation metrics
