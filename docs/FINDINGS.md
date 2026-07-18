@@ -114,10 +114,63 @@ level of individual task instances (same task, different seed, different outcome
 purely between distinct task types. This is a meaningful nuance, not a confound to hide —
 same-task-different-outcome variance is itself informative.
 
+## Phase P1 — Causal validation via activation patching (null result)
+
+C1 established that `post_plateau_var` *correlates* with solving. Phase P1 asked the next
+question: does it *cause* solving, or is it a side effect? Two pre-registered activation-
+patching pilots were run to test this, using `mod_arith_m10_d1` (the task type with a
+genuine solved/failed mix, per the caveat above), GPT-2 small's last layer (layer -1,
+matching C1's default), and 5 patch pairs per direction (10 total per pilot).
+
+**Patch target:** the attention module's output (`attn_output` — the value-weighted,
+output-projected vector added to the residual stream), not raw post-softmax attention
+weights. This target was chosen deliberately over patching the softmax weights directly:
+overwriting those mid-computation requires depending on internal `transformers`-library
+attention implementation details that vary across versions (eager vs. SDPA attention
+paths), whereas `attn_output` is the module's stable public return value and is directly
+downstream of the weights the project's metrics measure. Before trusting any patching
+result, the hook mechanism itself was verified with a dedicated test
+(`tests/test_patch.py`): confirmed that patching with a different vector changes the
+model's output logits, and that patching with the model's own unmodified vector is a
+no-op — ruling out a silently-inert hook, which would look identical to a genuine null
+result but mean nothing.
+
+**Pilot 1 — final token only:** patched only the attention output at the last prompt
+position (the position next-token prediction is directly conditioned on).
+Result: **0/10 pairs showed any shift** in next-token correctness, in either direction.
+
+**Pilot 2 — full post-plateau span:** patched every position from each recipient
+instance's own plateau-onset position (computed identically to how `post_plateau_var`
+itself locates plateau onset) through the end of the sequence — between 24 and 149
+positions per pair, in several cases nearly the entire sequence.
+Result: **0/10 pairs showed any shift**, even with most of the sequence's post-onset
+attention output replaced.
+
+**Conclusion:** at GPT-2 small's last layer, task correctness is robust to having the
+post-plateau attention-layer output partially or almost entirely replaced by a donor
+instance's. This is a materially stronger null than either pilot alone — the same result
+held whether one position or nearly the whole post-plateau span was patched. It is strong
+evidence that `post_plateau_var`, while a real and statistically significant correlate of
+solving (C1), is **not causally driven by this layer's attention output** — at least not
+in a way this patching design can detect.
+
+**Scope, stated explicitly rather than implied:** this rules out the last layer's
+attention-output component specifically, tested via a next-token-prediction proxy. It does
+not test earlier layers, other components (MLP outputs, individual attention heads), or
+effects that only appear across full multi-token generation rather than single-token
+prediction. Per the project's own rule against iterating configurations until one shows
+significance (see "What not to do," repo README/roadmap), these are noted as untested and
+deliberately not pursued further within this phase — a third patching configuration was
+not run to go looking for a positive result.
+
 ## Future work
 
-- Activation patching across the plateau boundary to test whether the variance difference
-  is causally linked to solving, not just correlated with it
+- ~~Activation patching across the plateau boundary~~ — **done, Phase P1 above (null
+  result at the last layer, attention-output component)**
+- Activation patching at earlier layers, or on other components (MLP output, individual
+  attention heads) — Phase P1 tested only the last layer's attention output
+- Full multi-token generation scoring for patching, rather than the next-token proxy used
+  in Phase P1
 - Head-level ablation to identify which attention heads drive the `post_plateau_var` signal
 - Larger model comparisons (GPT-2 medium/large, other model families)
 - Broader seed coverage beyond base seed 42

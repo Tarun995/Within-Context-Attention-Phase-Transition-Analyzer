@@ -1,0 +1,11 @@
+pair_id,task_family,layer,position,recipient_onset_pos,n_positions_patched,direction,seed,pre_patch_output_correct,post_patch_output_correct,shift_observed,timestamp
+solved_to_failed_mod_arith_m10_d1_seed42000_inst0_to_mod_arith_m10_d1_seed42001_inst1,easy_mod_arith,-1,post_plateau_range,38,128,solved_to_failed,1,False,False,False,2026-07-18T07:25:16.586667+00:00
+failed_to_solved_mod_arith_m10_d1_seed42001_inst1_to_mod_arith_m10_d1_seed42000_inst0,easy_mod_arith,-1,post_plateau_range,17,149,failed_to_solved,0,True,True,False,2026-07-18T07:25:17.036797+00:00
+solved_to_failed_mod_arith_m10_d1_seed42004_inst4_to_mod_arith_m10_d1_seed42002_inst2,easy_mod_arith,-1,post_plateau_range,31,135,solved_to_failed,2,False,False,False,2026-07-18T07:25:17.503544+00:00
+failed_to_solved_mod_arith_m10_d1_seed42002_inst2_to_mod_arith_m10_d1_seed42004_inst4,easy_mod_arith,-1,post_plateau_range,139,27,failed_to_solved,4,True,True,False,2026-07-18T07:25:17.965596+00:00
+solved_to_failed_mod_arith_m10_d1_seed42012_inst12_to_mod_arith_m10_d1_seed42003_inst3,easy_mod_arith,-1,post_plateau_range,26,140,solved_to_failed,3,False,False,False,2026-07-18T07:25:18.386580+00:00
+failed_to_solved_mod_arith_m10_d1_seed42003_inst3_to_mod_arith_m10_d1_seed42012_inst12,easy_mod_arith,-1,post_plateau_range,142,24,failed_to_solved,12,True,True,False,2026-07-18T07:25:18.825182+00:00
+solved_to_failed_mod_arith_m10_d1_seed42021_inst21_to_mod_arith_m10_d1_seed42005_inst5,easy_mod_arith,-1,post_plateau_range,127,39,solved_to_failed,5,False,False,False,2026-07-18T07:25:19.257637+00:00
+failed_to_solved_mod_arith_m10_d1_seed42005_inst5_to_mod_arith_m10_d1_seed42021_inst21,easy_mod_arith,-1,post_plateau_range,23,143,failed_to_solved,21,True,True,False,2026-07-18T07:25:19.709177+00:00
+solved_to_failed_mod_arith_m10_d1_seed42031_inst31_to_mod_arith_m10_d1_seed42006_inst6,easy_mod_arith,-1,post_plateau_range,21,145,solved_to_failed,6,False,False,False,2026-07-18T07:25:20.178407+00:00
+failed_to_solved_mod_arith_m10_d1_seed42006_inst6_to_mod_arith_m10_d1_seed42031_inst31,easy_mod_arith,-1,post_plateau_range,36,130,failed_to_solved,31,True,True,False,2026-07-18T07:25:20.607328+00:00
