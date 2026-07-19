@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   Activity, FlaskConical, Terminal, Upload, AlertTriangle, CheckCircle2,
-  XCircle, FileJson, ChevronRight, Beaker, Pin,
+  XCircle, FileJson, ChevronRight, Beaker, Pin, GitBranch,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +16,27 @@ const HEADLINE_STATS = [
   { metric: "post_plateau_var", label: "Post-plateau variance", nSolved: 17, nFailed: 12, meanSolved: 0.0371, meanFailed: 0.0194, p: 0.042, r: -0.549, sig: true, direction: "Solved > failed" },
   { metric: "plateau_onset_fraction", label: "Plateau onset fraction", nSolved: 17, nFailed: 13, meanSolved: 0.4062, meanFailed: 0.4738, p: 1.0, r: 0.186, sig: false, direction: "No effect" },
   { metric: "entropy_rise_rate", label: "Entropy rise rate", nSolved: 17, nFailed: 13, meanSolved: 0.0096, meanFailed: 0.0106, p: 1.0, r: 0.14, sig: false, direction: "No effect" },
+];
+
+// Phase P1 — causal activation-patching pilots (real results, from
+// results/patch_manifest.csv and results/patch_manifest_range.csv).
+const P1_PILOTS = [
+  {
+    id: "final-token",
+    label: "Pilot 1 — final token only",
+    scope: "Patched only the attention-layer output at the last prompt position, GPT-2 small layer -1.",
+    pairs: 10,
+    shifts: 0,
+    detail: "0/10 pairs showed any shift in next-token correctness, in either direction.",
+  },
+  {
+    id: "post-plateau-range",
+    label: "Pilot 2 — full post-plateau span",
+    scope: "Patched every position from each recipient's own plateau-onset position through the end of the sequence (24\u2013149 positions per pair).",
+    pairs: 10,
+    shifts: 0,
+    detail: "0/10 pairs showed any shift \u2014 even with most of the sequence's post-onset attention output replaced.",
+  },
 ];
 
 const PHASE0_TABLE = [
@@ -60,6 +81,11 @@ const JOURNEY = [
     phase: "Final (corrected)", tag: "verified", date: "Phase C1, current",
     claim: "post_plateau_var: solved > failed, p_corrected = 0.042, r = \u22120.549 (medium\u2013large effect).",
     correction: "Solved tasks keep attention more dynamic and oscillatory after the plateau \u2014 not quieter or more \u201clocked in.\u201d plateau_onset_fraction and entropy_rise_rate show no effect, reported rather than dropped.",
+  },
+  {
+    phase: "Phase P1", tag: "tested", date: "Causal activation patching",
+    claim: "Does the post_plateau_var correlation reflect a cause of solving, or just a side effect of it?",
+    correction: "Two pre-registered patching pilots (final token only, then the full post-plateau span) both found 0/10 pairs showed any output shift when the donor's attention-layer output was spliced in \u2014 even patching nearly the whole post-plateau span. The hook mechanism was independently verified before trusting either result. Honest reading: at GPT-2 small's last layer, this is a correlate of solving, not a cause of it \u2014 scoped to that layer and component; earlier layers, other components, and full-generation effects remain untested.",
   },
 ];
 
@@ -150,6 +176,15 @@ function Styles() {
       .apta-section-title{ font-family:var(--font-display); font-size:16px; font-weight:600; margin:0 0 4px; display:flex; align-items:center; gap:8px;}
       .apta-section-sub{ color:var(--ink-dim); font-size:12.5px; margin:0 0 14px; }
 
+      /* Causal / P1 panel */
+      .causal-pilot{ background:var(--panel-2); border:1px solid var(--border); border-radius:9px; padding:14px 16px; margin-bottom:10px; }
+      .causal-pilot:last-child{ margin-bottom:0; }
+      .causal-pilot-head{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+      .causal-pilot-label{ font-family:var(--font-mono); font-size:12.5px; color:var(--ink); font-weight:600; }
+      .causal-pilot-ratio{ font-family:var(--font-mono); font-size:13px; color:var(--ink-dim); }
+      .causal-pilot-scope{ font-size:12.5px; color:var(--ink-dim); line-height:1.55; margin-bottom:6px; }
+      .causal-pilot-detail{ font-size:12.5px; color:var(--ink); line-height:1.55; border-left:2px solid var(--border); padding-left:10px; }
+
       /* Notebook / journey */
       .ledger{ display:flex; flex-direction:column; gap:0; }
       .ledger-entry{ display:grid; grid-template-columns:120px 1fr; gap:20px; padding:22px 0; border-bottom:1px dashed var(--border); }
@@ -163,12 +198,15 @@ function Styles() {
       .stamp-bug{ color:var(--bug); border-color:var(--bug); }
       .stamp-fix{ color:var(--entropy); border-color:var(--entropy); }
       .stamp-verified{ color:var(--verified); border-color:var(--verified); }
+      .stamp-tested{ color:var(--ink-dim); border-color:var(--ink-dim); }
       .claim{ font-family:var(--font-serif); font-size:15px; line-height:1.6; color:#c9c5b8; }
       .claim.struck{ text-decoration:line-through; text-decoration-color:var(--retract); text-decoration-thickness:1.5px; opacity:.72; }
       .correction{ margin-top:10px; padding-left:14px; border-left:2px solid var(--verified); font-size:13px; line-height:1.6; color:var(--ink-dim); }
       .correction.isbug{ border-left-color:var(--bug); }
+      .correction.istested{ border-left-color:var(--ink-dim); }
       .correction-label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--verified); display:block; margin-bottom:4px; }
       .correction.isbug .correction-label{ color:var(--bug); }
+      .correction.istested .correction-label{ color:var(--ink-dim); }
 
       /* Run tab */
       .field{ display:flex; flex-direction:column; gap:6px; }
@@ -196,8 +234,6 @@ function Styles() {
 }
 
 function ScopeHero() {
-  // Stylized oscilloscope-style trace evoking entropy (cyan) + induction envelope (amber).
-  // Illustrative shape only — not a plot of real per-token data.
   return (
     <div className="scope">
       <svg viewBox="0 0 520 160" role="img" aria-label="Stylized entropy and induction envelope traces">
@@ -229,6 +265,38 @@ function ScopeHero() {
   );
 }
 
+function CausalPanel() {
+  return (
+    <div className="apta-card">
+      <p className="apta-section-title"><GitBranch size={16} color="var(--ink-dim)" /> Is it causal? &mdash; Phase P1</p>
+      <p className="apta-section-sub">
+        C1 shows post_plateau_var correlates with solving. Phase P1 tested whether it's causal,
+        by capturing the attention-layer output from a solved task's forward pass and splicing
+        it into a failed task's forward pass (and vice versa), then checking whether the
+        model's answer shifted. Two pre-registered pilots, both null.
+      </p>
+      {P1_PILOTS.map((pilot) => (
+        <div className="causal-pilot" key={pilot.id}>
+          <div className="causal-pilot-head">
+            <span className="causal-pilot-label">{pilot.label}</span>
+            <span className="causal-pilot-ratio">{pilot.shifts}/{pilot.pairs} pairs shifted</span>
+          </div>
+          <div className="causal-pilot-scope">{pilot.scope}</div>
+          <div className="causal-pilot-detail">{pilot.detail}</div>
+        </div>
+      ))}
+      <p style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.6, marginTop: 12, marginBottom: 0 }}>
+        <strong style={{ color: "var(--ink)" }}>Honest reading:</strong> at GPT-2 small's last
+        layer, task correctness is robust to this component being heavily altered &mdash; real
+        evidence post_plateau_var is a correlate of solving rather than a cause of it, at this
+        layer and via this component. Earlier layers, other components (MLP, individual heads),
+        and full-generation effects remain untested &mdash; scope stated explicitly rather than
+        implied. Full method in the Notebook tab and <code style={{ fontFamily: "var(--font-mono)" }}>docs/FINDINGS.md</code>.
+      </p>
+    </div>
+  );
+}
+
 function Overview() {
   return (
     <div className="apta-grid">
@@ -243,11 +311,14 @@ function Overview() {
             instances show higher post-plateau entropy variance (0.0371 vs 0.0194), a medium&ndash;large
             effect (r = &minus;0.549). Read plainly: the model doesn&rsquo;t settle into a calmer state when
             it succeeds &mdash; it stays more oscillatory, plausibly a signature of sustained pattern-matching.
+            Causal patching (below) found this is a correlate, not (yet demonstrated to be) a cause.
           </p>
           <span className="apta-pill">n(solved)=17 &middot; n(failed)=12</span>
         </div>
         <ScopeHero />
       </div>
+
+      <CausalPanel />
 
       <div className="apta-card">
         <p className="apta-section-title"><Activity size={16} color="var(--entropy)" /> Tested metrics, Bonferroni-corrected (k=3)</p>
@@ -305,6 +376,7 @@ function Overview() {
           <li>CPU-only run shown; not benchmarked for GPU throughput.</li>
           <li>One base seed (42) with 5 derived instances per task type.</li>
           <li><code style={{ fontFamily: "var(--font-mono)" }}>mod_arith_m10_d1</code> appears in both solved and failed groups across seeds &mdash; the separation is partly at the instance level, not purely between task types.</li>
+          <li>Causal patching (Phase P1) tested only the last layer's attention-layer output, scored via next-token prediction rather than full generation &mdash; earlier layers, other components, and full-generation effects remain untested.</li>
         </ul>
       </div>
     </div>
@@ -312,8 +384,8 @@ function Overview() {
 }
 
 function Journey() {
-  const stampClass = { retracted: "stamp-retracted", bug: "stamp-bug", fix: "stamp-fix", verified: "stamp-verified" };
-  const stampLabel = { retracted: "Retracted", bug: "Bug found", fix: "Fix", verified: "Verified" };
+  const stampClass = { retracted: "stamp-retracted", bug: "stamp-bug", fix: "stamp-fix", verified: "stamp-verified", tested: "stamp-tested" };
+  const stampLabel = { retracted: "Retracted", bug: "Bug found", fix: "Fix", verified: "Verified", tested: "Tested (null)" };
   return (
     <div className="apta-card">
       <p className="apta-section-title"><FlaskConical size={16} color="var(--entropy)" /> Research notebook</p>
@@ -328,8 +400,8 @@ function Journey() {
             </div>
             <div>
               <div className={`claim ${entry.tag === "retracted" ? "struck" : ""}`}>{entry.claim}</div>
-              <div className={`correction ${entry.tag === "bug" ? "isbug" : ""}`}>
-                <span className="correction-label">{entry.tag === "verified" ? "Why it holds" : "What was actually found"}</span>
+              <div className={`correction ${entry.tag === "bug" ? "isbug" : ""} ${entry.tag === "tested" ? "istested" : ""}`}>
+                <span className="correction-label">{entry.tag === "verified" ? "Why it holds" : entry.tag === "tested" ? "What was found" : "What was actually found"}</span>
                 {entry.correction}
               </div>
             </div>
@@ -569,7 +641,8 @@ export default function AttentionPhaseDashboard() {
           <h1 className="apta-title">Within-Context Attention Phase Transition Analyzer</h1>
           <p className="apta-sub">
             A hypothesis-testing pipeline, not a visualization tool: synthetic tasks run through GPT-2, attention-derived
-            metrics extracted per token position, solved vs. failed compared with a properly powered, multiple-comparisons-corrected test.
+            metrics extracted per token position, solved vs. failed compared with a properly powered, multiple-comparisons-corrected test,
+            then causally tested via activation patching.
           </p>
           <span className="apta-repo">
             <a href="https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer" target="_blank" rel="noreferrer">
@@ -593,7 +666,7 @@ export default function AttentionPhaseDashboard() {
 
         <div className="apta-footer">
           <span>MIT licensed &middot; GPT-2 small (117M) &middot; single base seed (42)</span>
-          <span>tests/ &middot; 55+ regression tests</span>
+          <span>tests/ &middot; 60+ regression + patch-mechanism tests</span>
         </div>
       </div>
     </div>
