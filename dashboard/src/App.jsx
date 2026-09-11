@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ScatterChart, Scatter, ZAxis,
@@ -9,10 +9,13 @@ import {
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Real data, transcribed from README.md / docs/FINDINGS.md
+// Fallback data, transcribed from README.md / docs/FINDINGS.md.
+// Used only when dashboard/public/data.json isn't present (e.g. a fresh
+// clone before running export_dashboard_data.py). Once data.json loads,
+// the live pipeline output takes over — see AttentionPhaseDashboard below.
 // ---------------------------------------------------------------------------
 
-const HEADLINE_STATS = [
+const FALLBACK_HEADLINE_STATS = [
   { metric: "post_plateau_var", label: "Post-plateau variance", nSolved: 17, nFailed: 12, meanSolved: 0.0371, meanFailed: 0.0194, p: 0.042, r: -0.549, sig: true, direction: "Solved > failed" },
   { metric: "plateau_onset_fraction", label: "Plateau onset fraction", nSolved: 17, nFailed: 13, meanSolved: 0.4062, meanFailed: 0.4738, p: 1.0, r: 0.186, sig: false, direction: "No effect" },
   { metric: "entropy_rise_rate", label: "Entropy rise rate", nSolved: 17, nFailed: 13, meanSolved: 0.0096, meanFailed: 0.0106, p: 1.0, r: 0.14, sig: false, direction: "No effect" },
@@ -20,7 +23,7 @@ const HEADLINE_STATS = [
 
 // Phase P1 — causal activation-patching pilots (real results, from
 // results/patch_manifest.csv and results/patch_manifest_range.csv).
-const P1_PILOTS = [
+const FALLBACK_P1_PILOTS = [
   {
     id: "final-token",
     label: "Pilot 1 — final token only",
@@ -106,7 +109,7 @@ const EXAMPLE_RESULTS = {
     { task_id: "copy_matched_504_inst2", solved: false, actual_tokens: 504, plateau_onset_fraction: 0.47, post_plateau_var: 0.019, envelope_growth_pct: 4.8 },
     { task_id: "transduction_matched_504_inst1", solved: false, actual_tokens: 504, plateau_onset_fraction: 0.5, post_plateau_var: 0.015, envelope_growth_pct: 2.0 },
   ],
-  test_results: HEADLINE_STATS.map((h) => ({
+  test_results: FALLBACK_HEADLINE_STATS.map((h) => ({
     metric: h.metric, layer: -1, n_solved: h.nSolved, n_failed: h.nFailed,
     solved_mean: h.meanSolved, failed_mean: h.meanFailed, p_corrected: h.p,
     effect_size_r: h.r, significant: h.sig, direction: h.direction,
@@ -114,6 +117,59 @@ const EXAMPLE_RESULTS = {
 };
 
 const CLI_MODES = ["phase_c1", "single", "layer_sweep"];
+
+// ---------------------------------------------------------------------------
+// Live-data helpers — map dashboard/public/data.json (written by
+// export_dashboard_data.py) onto the same shapes the components already use.
+// ---------------------------------------------------------------------------
+
+const METRIC_LABELS = {
+  post_plateau_var: "Post-plateau variance",
+  plateau_onset_fraction: "Plateau onset fraction",
+  entropy_rise_rate: "Entropy rise rate",
+};
+
+function mapTestResultsToHeadline(testResults) {
+  return testResults.map((t) => ({
+    metric: t.metric,
+    label: METRIC_LABELS[t.metric] || t.metric,
+    nSolved: t.n_solved,
+    nFailed: t.n_failed,
+    meanSolved: t.solved_mean,
+    meanFailed: t.failed_mean,
+    p: t.p_corrected,
+    r: t.effect_size_r,
+    sig: t.significant,
+    direction: t.direction,
+  }));
+}
+
+function buildPilotsFromLive(p1) {
+  const sp = p1?.single_position?.summary;
+  const rp = p1?.range_position?.summary;
+  const pilots = [];
+  if (sp) {
+    pilots.push({
+      id: "final-token",
+      label: "Pilot 1 — final token only",
+      scope: "Patched only the attention-layer output at the last prompt position, GPT-2 small layer -1.",
+      pairs: sp.n_pairs,
+      shifts: sp.n_shift_observed,
+      detail: `${sp.n_shift_observed}/${sp.n_pairs} pairs showed any shift in next-token correctness, in either direction.`,
+    });
+  }
+  if (rp) {
+    pilots.push({
+      id: "post-plateau-range",
+      label: "Pilot 2 — full post-plateau span",
+      scope: "Patched every position from each recipient's own plateau-onset position through the end of the sequence.",
+      pairs: rp.n_pairs,
+      shifts: rp.n_shift_observed,
+      detail: `${rp.n_shift_observed}/${rp.n_pairs} pairs showed any shift — even with most of the sequence's post-onset attention output replaced.`,
+    });
+  }
+  return pilots.length ? pilots : FALLBACK_P1_PILOTS;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -265,7 +321,7 @@ function ScopeHero() {
   );
 }
 
-function CausalPanel() {
+function CausalPanel({ pilots }) {
   return (
     <div className="apta-card">
       <p className="apta-section-title"><GitBranch size={16} color="var(--ink-dim)" /> Is it causal? &mdash; Phase P1</p>
@@ -275,7 +331,7 @@ function CausalPanel() {
         it into a failed task's forward pass (and vice versa), then checking whether the
         model's answer shifted. Two pre-registered pilots, both null.
       </p>
-      {P1_PILOTS.map((pilot) => (
+      {pilots.map((pilot) => (
         <div className="causal-pilot" key={pilot.id}>
           <div className="causal-pilot-head">
             <span className="causal-pilot-label">{pilot.label}</span>
@@ -297,7 +353,7 @@ function CausalPanel() {
   );
 }
 
-function Overview() {
+function Overview({ headlineStats, p1Pilots }) {
   return (
     <div className="apta-grid">
       <div className="apta-hero">
@@ -318,7 +374,7 @@ function Overview() {
         <ScopeHero />
       </div>
 
-      <CausalPanel />
+      <CausalPanel pilots={p1Pilots} />
 
       <div className="apta-card">
         <p className="apta-section-title"><Activity size={16} color="var(--entropy)" /> Tested metrics, Bonferroni-corrected (k=3)</p>
@@ -332,7 +388,7 @@ function Overview() {
             </tr>
           </thead>
           <tbody>
-            {HEADLINE_STATS.map((row) => (
+            {headlineStats.map((row) => (
               <tr key={row.metric}>
                 <td style={{ color: "var(--ink)" }}>{row.metric}</td>
                 <td className="num">{row.nSolved}</td>
@@ -412,11 +468,19 @@ function Journey() {
   );
 }
 
-function RunTab() {
+function RunTab({ initialData }) {
   const [cfg, setCfg] = useState({ mode: "phase_c1", model: "gpt2", seed: 42, instances: 5, layer: -1, outputDir: "results" });
   const [parsed, setParsed] = useState(null);
   const [error, setError] = useState("");
   const [rawText, setRawText] = useState("");
+  const autoLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (initialData && !autoLoadedRef.current) {
+      setParsed(initialData);
+      autoLoadedRef.current = true;
+    }
+  }, [initialData]);
 
   const cmd = useMemo(() => {
     const parts = [
@@ -627,6 +691,25 @@ function RunTab() {
 
 export default function AttentionPhaseDashboard() {
   const [tab, setTab] = useState("overview");
+  const [liveData, setLiveData] = useState(null);
+
+  useEffect(() => {
+    fetch("/data.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setLiveData)
+      .catch(() => setLiveData(null));
+  }, []);
+
+  const headlineStats = liveData?.c1?.test_results?.length
+    ? mapTestResultsToHeadline(liveData.c1.test_results)
+    : FALLBACK_HEADLINE_STATS;
+
+  const p1Pilots = liveData?.p1_patching ? buildPilotsFromLive(liveData.p1_patching) : FALLBACK_P1_PILOTS;
+
+  const initialRunData = liveData
+    ? { config: liveData.c1.config, results: liveData.c1.per_task, test_results: liveData.c1.test_results }
+    : null;
+
   const tabs = [
     { id: "overview", label: "Finding", chan: "CH1", icon: Activity },
     { id: "journey", label: "Notebook", chan: "CH2", icon: FlaskConical },
@@ -660,9 +743,9 @@ export default function AttentionPhaseDashboard() {
           ))}
         </div>
 
-        {tab === "overview" && <Overview />}
+        {tab === "overview" && <Overview headlineStats={headlineStats} p1Pilots={p1Pilots} />}
         {tab === "journey" && <Journey />}
-        {tab === "run" && <RunTab />}
+        {tab === "run" && <RunTab initialData={initialRunData} />}
 
         <div className="apta-footer">
           <span>MIT licensed &middot; GPT-2 small (117M) &middot; single base seed (42)</span>
