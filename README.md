@@ -58,6 +58,37 @@ that initially reported the C1 result's direction backwards, and the Phase P1 ca
 above in full. The same story is laid out interactively in the **Notebook** tab of the
 [live dashboard](https://within-context-attention-phase-tran.vercel.app/).
 
+## Is a published confidence-probing method causally valid? (Causal Audit phase)
+
+A literature check found that internal-state signals predicting LLM correctness/confidence
+are an actively developed and even commercialized area of applied research — but every
+method found is validated *correlationally*. None test whether the signal is causally
+load-bearing in the model's computation, which is exactly the question P1 already asked and
+answered for `post_plateau_var`. This phase extends that same activation-patching test to a
+real, published class of confidence-probing method, on a real benchmark, rather than a
+synthetic task.
+
+A hidden-state linear probe (Azaria & Mitchell, 2023 style) was reproduced on TruthfulQA mc1
+(817 questions, GPT-2 small): predicting whether the model's own top-scored answer is
+correct, from a residual-stream hidden state. A layer sweep found a clear peak at **layer 3
+(AUC 0.83)**, bracketed on both sides by lower-AUC neighboring layers — a working, validated
+baseline in line with published results for this class of method.
+
+Two activation-patching causal tests, of increasing strength, were then run on that layer-3
+signal: single-position patching (only the final prompt-prefix token) and range patching
+(every prefix token, closing the bypass where the model could still read the untouched
+question directly). Both included a random-vector control and McNemar's test on the paired
+outcomes, not just a raw flip count. **Both tests returned a null result** — donor-patched
+flip rates were statistically indistinguishable from random-vector disruption in every
+condition tested (all p > 0.025, Bonferroni-corrected for 2 directions).
+
+**Honest reading:** the layer-3 signal that predicts correctness with AUC 0.83 does not
+appear to be part of the mechanism that produces correctness, at either intervention
+strength tested. This is the second independent null result this project has produced with
+this same causal-patching methodology — the first being `post_plateau_var` in Phase P1, a
+structurally different signal on a different task family. Full method, statistics, and
+limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
+
 ## Why the C1 result can be trusted
 
 Bonferroni correction was applied across all 3 tested metrics — including an earlier
@@ -111,6 +142,20 @@ python -m attn_phase.run_p1_pilot_range --n-pairs 5     # full post-plateau span
 Results write incrementally to `results/patch_manifest.csv` and
 `results/patch_manifest_range.csv` — safe to interrupt and resume.
 
+Run the Causal Audit phase directly (standalone scripts for now — not yet folded into the
+`attn-phase` CLI):
+
+```bash
+python verify_audit_pipeline.py --device cuda --n 817 --layer 3   # probe + layer sweep
+python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode single
+python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode range
+```
+
+Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
+after). `--mode single` patches only the final prompt-prefix token; `--mode range` patches
+every prefix token — see [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md)
+for why both were run.
+
 ## Repository structure
 
 ```
@@ -128,8 +173,17 @@ attention-phase-analyzer/
         run_p1_pilot.py                    # Phase P1 pilot: final-token patching
         run_p1_pilot_range.py               # Phase P1 pilot: full post-plateau-span patching
         cli.py                                  # single command-line entry point
-    tests/                        # 60+ tests: tasks, metrics, answer-matching, stats, patching
+        audit/                                    # Causal Audit phase
+            data.py                                   # TruthfulQA mc1 loading, prompt formatting
+            activations.py                             # hidden-state capture + patching hooks
+            linear_probe.py                             # Baseline 1: hidden-state linear probe
+            causal_test.py                               # donor/recipient causal test, single + range
+    verify_audit_pipeline.py        # Causal Audit: probe + layer sweep, standalone script
+    run_causal_test.py               # Causal Audit: causal test runner, standalone script
+    tests/                        # 60+ tests: tasks, metrics, answer-matching, stats, patching,
+                                  # plus the Causal Audit phase's own hook/probe/patch tests
     docs/FINDINGS.md                # full research narrative, incl. bugs found + P1 causal test
+    docs/CAUSAL_AUDIT_FINDINGS.md    # Causal Audit phase: probe reproduction + causal test results
     results/                          # generated at runtime, not tracked in git
 ```
 
@@ -143,7 +197,11 @@ python -m pytest tests/ -v
 properties, answer-matching regression cases, statistical direction-labeling (added after
 Bug #3), and the Phase P1 patch-hook mechanism itself (`test_patch.py` — verifies the hook
 actually intervenes in the forward pass rather than silently no-op'ing, since a broken hook
-would look identical to a genuine null causal result).
+would look identical to a genuine null causal result). The Causal Audit phase adds its own
+tests on the same principle — `tests/test_causal_patch.py` verifies, against a randomly-
+initialized model with no network dependency, that patching a prefix position genuinely
+changes downstream choice-token scores while leaving earlier positions untouched (causal
+masking sanity check) before any real result from that phase is trusted.
 
 ## Limitations
 
@@ -160,6 +218,11 @@ would look identical to a genuine null causal result).
   outcomes via next-token prediction rather than full multi-token generation.** The null
   result found is scoped to that specific configuration — see FINDINGS.md, Phase P1, for
   what remains untested and why it wasn't pursued further within this phase.
+- **Causal Audit phase tested one baseline method (hidden-state linear probe), one
+  benchmark (TruthfulQA mc1), one model (GPT-2 small), and one layer (3, the AUC-sweep
+  peak).** A second baseline (attention-concentration score) and second benchmark are
+  planned but not yet run — see `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full
+  list of what a single method's null result does and doesn't establish.
 
 ## Related work
 
@@ -167,6 +230,8 @@ would look identical to a genuine null causal result).
 - Vig (2019) — BertViz, a multiscale attention visualization tool
 - Edelman et al. (2024) — "The Evolution of Statistical Induction Heads: In-Context Learning Markov Chains" (NeurIPS 2024)
 - Todd et al. (2024) — "Function Vectors in Large Language Models" (ICLR 2024)
+- Azaria & Mitchell (2023) — "The Internal State of an LLM Knows When It's Lying" (hidden-state
+  linear probe reproduced and causally tested in the Causal Audit phase)
 
 ## License
 

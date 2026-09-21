@@ -7,3 +7,5 @@ plotly
 streamlit
 ruptures
 jupyter
+datasets>=2.14
+scikit-learn>=1.3
