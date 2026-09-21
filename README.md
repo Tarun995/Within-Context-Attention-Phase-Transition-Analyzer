@@ -14,6 +14,29 @@ metrics per token position, runs a properly powered, multiple-comparisons-correc
 statistical test comparing solved vs. failed task instances, and — as of Phase P1 —
 causally tests the resulting correlation via activation patching.
 
+## Research vision
+
+The throughline across every phase of this project is one question: **when an internal
+signal inside a language model correlates with whether it gets something right, is that
+signal actually part of *why* it got it right — or just a symptom that happens to track the
+outcome?** Almost all interpretability and LLM-confidence work stops at the correlation.
+This project is built specifically to not stop there.
+
+| Phase | Question asked | Method | Result |
+|---|---|---|---|
+| **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
+| **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
+| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce a real method (hidden-state linear probe), causally test it the same way | **No** — same null pattern, on a real benchmark, on someone else's method |
+
+Two structurally different signals, on two different task families, both predicting
+behavior without demonstrably causing it — found with the same rigor each time: pre-register
+what counts as a positive result before running it, verify the intervention mechanism itself
+before trusting any result from it, and report null findings as first-class, not as failures
+to hide. **Where this is headed next:** a second confidence-probing baseline
+(attention-concentration score) and a second benchmark, to see whether this null pattern is
+a property of *this specific method and model*, or something more general about the gap
+between what internal states predict and what they cause. See "Roadmap" below.
+
 ## Headline result (GPT-2 small, Phase C1)
 
 Across 30 task instances (5 seeds × 6 task types, matched for prompt length where relevant),
@@ -73,6 +96,8 @@ A hidden-state linear probe (Azaria & Mitchell, 2023 style) was reproduced on Tr
 correct, from a residual-stream hidden state. A layer sweep found a clear peak at **layer 3
 (AUC 0.83)**, bracketed on both sides by lower-AUC neighboring layers — a working, validated
 baseline in line with published results for this class of method.
+
+![Linear probe AUC by layer](plots/causal_audit_layer_sweep.png)
 
 Two activation-patching causal tests, of increasing strength, were then run on that layer-3
 signal: single-position patching (only the final prompt-prefix token) and range patching
@@ -223,6 +248,21 @@ masking sanity check) before any real result from that phase is trusted.
   peak).** A second baseline (attention-concentration score) and second benchmark are
   planned but not yet run — see `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full
   list of what a single method's null result does and doesn't establish.
+
+## Roadmap
+
+- **Baseline 2 (attention-concentration score)** — reproduce and causally test a second,
+  structurally different confidence-probing method, to check whether the Causal Audit's
+  null result is specific to hidden-state linear probes or holds more generally.
+- **Second benchmark (TriviaQA)** — checks whether the null result is specific to
+  TruthfulQA's adversarial framing or generalizes to a more conventional QA benchmark.
+- **Broader layer coverage for the causal test** — only layer 3 (the AUC-sweep peak) has
+  been causally tested so far; a signal could in principle be load-bearing at a different
+  layer even where the AUC-maximizing one isn't.
+- **Model scaling** — Pythia at small-to-medium sizes, to check whether the pattern found in
+  GPT-2 small holds as scale increases.
+- **Stretch: a short technical write-up** connecting C1 → P1 → Causal Audit as one coherent
+  research arc, once a second baseline method's result is in.
 
 ## Related work
 
