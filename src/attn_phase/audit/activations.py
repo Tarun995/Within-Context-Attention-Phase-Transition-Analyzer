@@ -85,7 +85,8 @@ def capture_hidden_state(model, tokenizer, text: str, layer_idx: int,
 # ---------------------------------------------------------------------------
 
 def run_with_hidden_patch(model, input_ids: torch.Tensor, layer_idx: int,
-                           patch_vec, device: str, position=-1):
+                           patch_vec, device: str, position=-1,
+                           return_attentions: bool = False):
     """
     Runs one forward pass on `input_ids`. If patch_vec is given (a
     [hidden_dim] tensor), overwrites the block's residual-stream output at
@@ -111,6 +112,13 @@ def run_with_hidden_patch(model, input_ids: torch.Tensor, layer_idx: int,
     every subsequent answer token's score), pass the specific position(s)
     you want patched, not -1.
 
+    `return_attentions`: if True, also requests output_attentions=True on
+    the forward pass and returns (logits, attentions) instead of just
+    logits — used by causal_test_concentration.py to check whether a
+    patch shifted the recipient's OWN attention-concentration pattern,
+    not just its output correctness. Default False keeps the original
+    single-return-value contract for existing callers.
+
     Returns full logits, shape [seq_len, vocab_size] (not just the last
     position) so callers that need scores for every position — e.g.
     teacher-forced choice scoring — don't need a second forward pass.
@@ -128,8 +136,12 @@ def run_with_hidden_patch(model, input_ids: torch.Tensor, layer_idx: int,
     handle = _get_block_module(model, layer_idx).register_forward_hook(hook)
     try:
         with torch.no_grad():
-            out = model(input_ids.to(device))
-        return out.logits[0].detach()
+            out = model(input_ids.to(device), output_attentions=return_attentions)
+        logits = out.logits[0].detach()
+        if return_attentions:
+            attentions = tuple(a.detach() for a in out.attentions)
+            return logits, attentions
+        return logits
     finally:
         handle.remove()
 

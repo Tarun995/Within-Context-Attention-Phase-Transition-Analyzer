@@ -26,16 +26,15 @@ This project is built specifically to not stop there.
 |---|---|---|---|
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
-| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce a real method (hidden-state linear probe), causally test it the same way | **No** — same null pattern, on a real benchmark, on someone else's method |
+| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No** — same null pattern on 2 independent methods, on a real benchmark |
 
 Two structurally different signals, on two different task families, both predicting
 behavior without demonstrably causing it — found with the same rigor each time: pre-register
 what counts as a positive result before running it, verify the intervention mechanism itself
 before trusting any result from it, and report null findings as first-class, not as failures
-to hide. **Where this is headed next:** a second confidence-probing baseline
-(attention-concentration score) and a second benchmark, to see whether this null pattern is
-a property of *this specific method and model*, or something more general about the gap
-between what internal states predict and what they cause. See "Roadmap" below.
+to hide. **Where this is headed next:** a second benchmark (TriviaQA) and a model-scaling
+check, to see whether this null pattern is a property of *this specific model* or something
+more general. See "Roadmap" below.
 
 ## Headline result (GPT-2 small, Phase C1)
 
@@ -114,6 +113,20 @@ this same causal-patching methodology — the first being `post_plateau_var` in 
 structurally different signal on a different task family. Full method, statistics, and
 limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
 
+**Baseline 2 (attention-concentration score)** was reproduced next, and checked carefully
+before trusting it: aggregated across all 12 layers and all attention heads (not just one
+layer, matching the method's full published description), it achieves only **AUC 0.54** —
+barely above chance, versus Baseline 1's 0.83. The weak signal held even after ruling out
+under-aggregation as the cause. A causal test was still run (patching the representation
+behind the concentration score, measuring both a correctness flip and a shift in the
+recipient's own concentration score) — also null, though this null carries less weight than
+Baseline 1's, since there wasn't much of a real signal to begin with. A secondary, unplanned
+pattern showed up across every causal test run so far, worth its own mention: wherever a
+significant difference appeared, **random noise disrupted the model more than the real donor
+representation did** — the opposite of what a causal effect would predict, replicated three
+times independently. Full results in
+[`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Section 6.
+
 ## Why the C1 result can be trusted
 
 Bonferroni correction was applied across all 3 tested metrics — including an earlier
@@ -174,6 +187,8 @@ Run the Causal Audit phase directly (standalone scripts for now — not yet fold
 python verify_audit_pipeline.py --device cuda --n 817 --layer 3   # probe + layer sweep
 python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode single
 python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode range
+python run_attention_score_probe_multilayer.py --device cuda --n 817   # baseline 2 probe
+python run_causal_test_concentration.py --device cuda --layer 1 --n-questions 817 --n-pairs 50
 ```
 
 Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
@@ -203,8 +218,12 @@ attention-phase-analyzer/
             activations.py                             # hidden-state capture + patching hooks
             linear_probe.py                             # Baseline 1: hidden-state linear probe
             causal_test.py                               # donor/recipient causal test, single + range
-    verify_audit_pipeline.py        # Causal Audit: probe + layer sweep, standalone script
-    run_causal_test.py               # Causal Audit: causal test runner, standalone script
+            attention_score.py                            # Baseline 2: attention-concentration score
+            causal_test_concentration.py                   # Baseline 2's causal test
+    verify_audit_pipeline.py        # Causal Audit: Baseline 1 probe + layer sweep
+    run_causal_test.py               # Causal Audit: Baseline 1 causal test runner
+    run_attention_score_probe_multilayer.py   # Causal Audit: Baseline 2 probe (multi-layer)
+    run_causal_test_concentration.py           # Causal Audit: Baseline 2 causal test runner
     tests/                        # 60+ tests: tasks, metrics, answer-matching, stats, patching,
                                   # plus the Causal Audit phase's own hook/probe/patch tests
     docs/FINDINGS.md                # full research narrative, incl. bugs found + P1 causal test
@@ -226,7 +245,12 @@ would look identical to a genuine null causal result). The Causal Audit phase ad
 tests on the same principle — `tests/test_causal_patch.py` verifies, against a randomly-
 initialized model with no network dependency, that patching a prefix position genuinely
 changes downstream choice-token scores while leaving earlier positions untouched (causal
-masking sanity check) before any real result from that phase is trusted.
+masking sanity check) before any real result from that phase is trusted. `tests/test_attention_score.py`
+adds the same discipline for Baseline 2, and caught two real issues during development: an
+empty-attentions silent failure mode (recent `transformers` versions need
+`attn_implementation="eager"` for `output_attentions=True` to return anything), and a
+layer-ordering bug where a block's own attention pattern can't be affected by patching that
+same block's output (only a later layer's can).
 
 ## Limitations
 
@@ -243,26 +267,28 @@ masking sanity check) before any real result from that phase is trusted.
   outcomes via next-token prediction rather than full multi-token generation.** The null
   result found is scoped to that specific configuration — see FINDINGS.md, Phase P1, for
   what remains untested and why it wasn't pursued further within this phase.
-- **Causal Audit phase tested one baseline method (hidden-state linear probe), one
-  benchmark (TruthfulQA mc1), one model (GPT-2 small), and one layer (3, the AUC-sweep
-  peak).** A second baseline (attention-concentration score) and second benchmark are
-  planned but not yet run — see `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full
-  list of what a single method's null result does and doesn't establish.
+- **Causal Audit phase tested two baseline methods (hidden-state linear probe, attention-
+  concentration score), one benchmark (TruthfulQA mc1), one model (GPT-2 small), and only
+  each method's own best-AUC layer.** Baseline 2's correlational signal was weak to begin
+  with (AUC 0.54), so its causal null carries less evidential weight than Baseline 1's
+  (which started from a clearly real AUC-0.83 signal). See
+  `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full list of what these results do
+  and don't establish.
 
 ## Roadmap
 
-- **Baseline 2 (attention-concentration score)** — reproduce and causally test a second,
-  structurally different confidence-probing method, to check whether the Causal Audit's
-  null result is specific to hidden-state linear probes or holds more generally.
-- **Second benchmark (TriviaQA)** — checks whether the null result is specific to
-  TruthfulQA's adversarial framing or generalizes to a more conventional QA benchmark.
-- **Broader layer coverage for the causal test** — only layer 3 (the AUC-sweep peak) has
-  been causally tested so far; a signal could in principle be load-bearing at a different
-  layer even where the AUC-maximizing one isn't.
+- **Second benchmark (TriviaQA)** — checks whether the null results are specific to
+  TruthfulQA's adversarial framing or generalize to a more conventional QA benchmark.
+- **Broader layer coverage for the causal test** — only the AUC-sweep peak layer has been
+  causally tested for each baseline so far; a signal could in principle be load-bearing at a
+  different layer even where the AUC-maximizing one isn't.
 - **Model scaling** — Pythia at small-to-medium sizes, to check whether the pattern found in
   GPT-2 small holds as scale increases.
+- **A dedicated test of the "control disrupts more than donor" pattern** — observed three
+  times across both baselines' causal tests, not hypothesized in advance; worth a properly
+  designed follow-up rather than treating it as confirmed on the strength of a side-observation.
 - **Stretch: a short technical write-up** connecting C1 → P1 → Causal Audit as one coherent
-  research arc, once a second baseline method's result is in.
+  research arc, now that both baseline methods have a result.
 
 ## Related work
 
