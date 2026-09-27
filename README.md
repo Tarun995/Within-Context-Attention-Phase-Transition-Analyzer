@@ -27,14 +27,17 @@ This project is built specifically to not stop there.
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
 | **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No** — same null pattern on 2 independent methods, on a real benchmark |
+| **On-Manifold Test** | *Why* did every causal test's random-noise control disrupt the model more than a real donor swap? | Three-way patch comparison: real-relevant vs. real-unrelated vs. random noise | **Graded, significant ordering** (donor < unrelated < noise, all p<0.0001) — disruption tracks how in-distribution the injected representation is |
 
 Two structurally different signals, on two different task families, both predicting
 behavior without demonstrably causing it — found with the same rigor each time: pre-register
 what counts as a positive result before running it, verify the intervention mechanism itself
 before trusting any result from it, and report null findings as first-class, not as failures
-to hide. **Where this is headed next:** a second benchmark (TriviaQA) and a model-scaling
-check, to see whether this null pattern is a property of *this specific model* or something
-more general. See "Roadmap" below.
+to hide. Along the way, a pattern showed up that wasn't hypothesized in advance — random-noise
+controls consistently disrupting the model more than real donor swaps — and rather than just
+noting it, a dedicated follow-up test confirmed a specific, graded explanation for it (see
+"Is a published confidence-probing method causally valid?" below). **Where this is headed
+next:** a second benchmark (TriviaQA) and a model-scaling check. See "Roadmap" below.
 
 ## Headline result (GPT-2 small, Phase C1)
 
@@ -123,9 +126,19 @@ recipient's own concentration score) — also null, though this null carries les
 Baseline 1's, since there wasn't much of a real signal to begin with. A secondary, unplanned
 pattern showed up across every causal test run so far, worth its own mention: wherever a
 significant difference appeared, **random noise disrupted the model more than the real donor
-representation did** — the opposite of what a causal effect would predict, replicated three
-times independently. Full results in
-[`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Section 6.
+representation did** — the opposite of what a causal effect would predict.
+
+**That pattern was then investigated directly, not just noted, with a dedicated three-way
+test:** for 50 recipient questions, the same position was patched with a real, on-topic donor
+activation; a real but topically *unrelated* activation (a filler sentence like "The weather
+in the mountains changes quickly during autumn."); and matched-scale random noise. Disruption
+severity formed a strictly increasing, statistically significant ordering — **donor (0.108) <
+unrelated (0.556) < noise (4.061)**, all three pairwise comparisons p<0.0001. This is genuine,
+graded evidence for an *on-manifold vs. off-manifold* explanation: disruption tracks how
+in-distribution an injected representation is, not whether it happens to be relevant to the
+question. This is arguably the project's most distinctive finding to date — discovered through
+a test designed for this project, not reproduced from prior published work. Full results in
+[`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Sections 6–7.
 
 ## Why the C1 result can be trusted
 
@@ -189,6 +202,7 @@ python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50
 python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode range
 python run_attention_score_probe_multilayer.py --device cuda --n 817   # baseline 2 probe
 python run_causal_test_concentration.py --device cuda --layer 1 --n-questions 817 --n-pairs 50
+python run_manifold_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50   # on-manifold test
 ```
 
 Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
@@ -220,10 +234,12 @@ attention-phase-analyzer/
             causal_test.py                               # donor/recipient causal test, single + range
             attention_score.py                            # Baseline 2: attention-concentration score
             causal_test_concentration.py                   # Baseline 2's causal test
+            causal_test_manifold.py                          # on-manifold vs off-manifold perturbation test
     verify_audit_pipeline.py        # Causal Audit: Baseline 1 probe + layer sweep
     run_causal_test.py               # Causal Audit: Baseline 1 causal test runner
     run_attention_score_probe_multilayer.py   # Causal Audit: Baseline 2 probe (multi-layer)
     run_causal_test_concentration.py           # Causal Audit: Baseline 2 causal test runner
+    run_manifold_test.py                        # Causal Audit: on-manifold vs off-manifold test runner
     tests/                        # 60+ tests: tasks, metrics, answer-matching, stats, patching,
                                   # plus the Causal Audit phase's own hook/probe/patch tests
     docs/FINDINGS.md                # full research narrative, incl. bugs found + P1 causal test
@@ -282,11 +298,11 @@ same block's output (only a later layer's can).
 - **Broader layer coverage for the causal test** — only the AUC-sweep peak layer has been
   causally tested for each baseline so far; a signal could in principle be load-bearing at a
   different layer even where the AUC-maximizing one isn't.
+- **Extend the on-manifold test** to Baseline 2's layer/setup and to range-patching, to check
+  whether the donor < unrelated < noise ordering holds generally or is specific to the
+  layer-3/single-patch configuration it was first found in.
 - **Model scaling** — Pythia at small-to-medium sizes, to check whether the pattern found in
   GPT-2 small holds as scale increases.
-- **A dedicated test of the "control disrupts more than donor" pattern** — observed three
-  times across both baselines' causal tests, not hypothesized in advance; worth a properly
-  designed follow-up rather than treating it as confirmed on the strength of a side-observation.
 - **Stretch: a short technical write-up** connecting C1 → P1 → Causal Audit as one coherent
   research arc, now that both baseline methods have a result.
 

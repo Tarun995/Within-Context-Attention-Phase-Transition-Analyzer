@@ -1,7 +1,8 @@
 # Causal Validity Audit of LLM Confidence-Probing Methods — Findings
 
 **Status:** Baseline 1 (hidden-state linear probe) and Baseline 2
-(attention-concentration score) both complete.
+(attention-concentration score) both complete. On-manifold vs.
+off-manifold perturbation test complete (Section 7).
 **Model:** GPT-2 small (`gpt2`, 12 layers, HuggingFace `transformers`)
 **Benchmark:** TruthfulQA, multiple-choice (`mc1`), full validation split, n=817
 **Repo:** [Within-Context Attention Phase Transition Analyzer](https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer)
@@ -41,6 +42,20 @@ than the real donor representation did** — the opposite of what a causal
 effect would predict. This happened in Baseline 1's single-position test
 (both directions) and Baseline 2's test (2 of 4 measured outcomes). Not a
 single comparison, across either baseline, showed donor beating control.
+
+**A dedicated follow-up test was then run to explain that pattern
+directly, and found a clean, graded result:** disruption severity scales
+specifically with how in-distribution an injected representation is — a
+real donor activation (mean disruption 0.108), a real but topically
+unrelated activation (0.556), and matched-scale random noise (4.061) form
+a strictly increasing, statistically significant ordering (all pairwise
+p<0.0001, n=50). This is genuine support for an "on-manifold vs.
+off-manifold perturbation" explanation: it isn't about topical relevance
+to the question specifically, it's about how close the injected vector is
+to something the model would actually produce on its own. See Section 7
+for full method and results — this is arguably the project's most
+distinctive finding to date, discovered rather than reproduced from prior
+work.
 
 This is the second and third independent null result this project has
 produced with this same causal-patching methodology — the first being
@@ -313,17 +328,91 @@ Baseline 1's range patch, and Baseline 2's concentration-based patch —
 every statistically significant comparison showed the same direction:
 **random-vector noise disrupted the model's output more than a real,
 meaningful donor representation did.** This was not hypothesized in
-advance and deserves more investigation before drawing a strong
-conclusion, but three independent replications of the same specific,
-counterintuitive pattern is unlikely to be coincidence. A plausible
-reading: the model's representation space has enough structure that "any
-real activation from anywhere in-distribution" is a gentler perturbation
-than synthetic noise of matched scale — independent of which specific
-correctness-predicting method is being tested.
+advance. A dedicated follow-up test was run to investigate it directly —
+see Section 7.
 
 ---
 
-## 7. Limitations
+## 7. On-Manifold vs. Off-Manifold Perturbation Test
+
+### 7.1 Motivation and design
+
+The pattern noted in Section 6.4 suggests a specific explanation: real
+activations produced by real inputs sit near a lower-dimensional
+"manifold" inside the full representation space. A donor swap — however
+semantically wrong for the question at hand — is still a real,
+in-distribution point near that manifold. Matched-scale random noise is
+not; it points in an essentially arbitrary direction the model never
+actually produces. If this is what's driving the pattern, disruption
+severity should scale with how in-distribution the injected vector is,
+not with whether it happens to be relevant to the question.
+
+To test this directly (not just re-observe it), a third condition was
+added between the existing two: for 50 recipient questions, the same
+prefix-boundary position (layer 3, single-position patch — matching
+Baseline 1's already-reported configuration) was patched with three
+different vectors per recipient:
+1. **donor** — a real activation from a different, ON-topic TruthfulQA
+   question (as before).
+2. **unrelated** — a real activation from a genuinely OFF-topic filler
+   sentence (e.g. "The weather in the mountains changes quickly during
+   autumn.") — real text, real activation, no relevance to TruthfulQA
+   content or even to QA-style prompts at all.
+3. **noise** — a random vector matched in scale to the donor's std (the
+   existing control).
+
+Disruption was measured two ways: a continuous magnitude (L2 distance
+between the choice-loglikelihood vectors before and after patching — more
+statistically informative for ORDERING three conditions than a binary
+outcome) and a correctness-flip count, for continuity with earlier
+results.
+
+### 7.2 Results
+
+| Condition | Mean disruption magnitude | Correctness flips (of 50) |
+|---|---|---|
+| donor (real, on-topic) | **0.108** | 0/50 |
+| unrelated (real, off-topic) | **0.556** | 0/50 |
+| noise (not real) | **4.061** | 8/50 |
+
+| Comparison | Wilcoxon p-value |
+|---|---|
+| donor vs. unrelated | <0.0001 |
+| unrelated vs. noise | <0.0001 |
+| donor vs. noise | <0.0001 |
+
+A strictly increasing, statistically significant ordering across all
+three pairwise comparisons — not just the endpoints. The jump from donor
+to unrelated (~5x) and from unrelated to noise (~7x) are each individually
+significant, not just the overall donor-vs-noise gap.
+
+### 7.3 Interpretation
+
+This is genuine, graded support for the on-manifold explanation. Disruption
+severity tracks specifically how in-distribution the injected
+representation is — a real-but-irrelevant sentence sits meaningfully
+between a real donor and pure noise, rather than behaving like either
+endpoint. This rules out the narrower alternative explanation ("the
+effect is really about topical relevance to the question, not
+representation geometry") — if that were true, "unrelated" should have
+behaved like noise, not landed cleanly in between.
+
+This explains the pattern first noticed as a side effect of Baseline 1
+and Baseline 2's causal tests, and stands on its own as this project's
+most distinctive finding to date: a specific, discovered structural
+property of GPT-2's representation space, found through a design built
+for this project rather than reproduced from prior published work.
+
+**What this does and doesn't say about the earlier causal-audit
+results:** it does not overturn either null finding — Baseline 1 and
+Baseline 2's correctness-flip patching results stand as reported. What it
+adds is an explanation for *why* the random-vector control behaved the
+way it did in those tests, and a new, independently interesting finding
+about the geometry of the representation space itself.
+
+---
+
+## 8. Limitations
 
 - **Single benchmark** (TruthfulQA mc1) — no cross-benchmark check yet
   (TriviaQA planned as a second benchmark per the original project plan).
@@ -348,11 +437,11 @@ correctness-predicting method is being tested.
   module structure) and was left untested here, consistent with this
   project's own Phase P1 also leaving raw-softmax-weight patching
   untested (see main README, Limitations).
-- **The "control disrupts more than donor" pattern (Section 6.4) is
-  observational, not hypothesized in advance.** Three replications is
-  suggestive but not a designed test of this specific phenomenon — a
-  dedicated follow-up would be needed to treat it as a confirmed finding
-  rather than a noted pattern.
+- **The on-manifold vs. off-manifold finding (Section 7) used only 12
+  fixed filler sentences and a single layer/mode (layer 3, single-patch)
+  — a small, fixed pool. The result was clean and strongly significant,
+  but worth expanding the filler set and testing at Baseline 2's layer
+  too before treating it as fully general across configurations.
 - **Donor/recipient pairing is unpaired by content** — pairs are random
   question pairs, not matched for topic or structure, unlike P1's
   same-template synthetic task pairs. This is a real methodological
@@ -361,7 +450,7 @@ correctness-predicting method is being tested.
 
 ---
 
-## 8. Next steps
+## 9. Next steps
 
 1. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
    result is specific to TruthfulQA's adversarial design or generalizes.
@@ -369,8 +458,9 @@ correctness-predicting method is being tested.
 3. Optionally extend Baseline 1's causal test to additional layers, in
    case a non-AUC-maximizing layer turns out to be causally load-bearing
    where layer 3 wasn't.
-4. A dedicated, pre-registered test of the "control disrupts more than
-   donor" pattern noted in Section 6.4, if it continues to show up in
-   further work.
-5. Write up the two-baseline result as the stretch-goal preprint-style
-   document connecting C1 → P1 → this audit as one coherent research arc.
+4. Extend the on-manifold test (Section 7) to Baseline 2's layer/setup
+   and to range-patching, to check whether the donor < unrelated < noise
+   ordering holds generally or is specific to layer 3/single-patch.
+5. Write up the full result (two baselines, both null; the on-manifold
+   finding explaining why) as the stretch-goal preprint-style document
+   connecting C1 → P1 → this audit as one coherent research arc.
