@@ -1,42 +1,48 @@
 """
-audit/causal_test_manifold.py — Tests the "on-manifold vs. off-manifold
-perturbation" hypothesis, prompted by a pattern that showed up across
-EVERY causal test run so far in this project (Baseline 1 single-patch,
-Baseline 2's concentration test): wherever a statistically significant
-difference appeared, a random-vector CONTROL disrupted the model's output
-MORE than a real DONOR representation did — the opposite of what a causal
-effect would predict.
+audit/causal_test_manifold.py — on-manifold vs. off-manifold perturbation test.
 
-ONE PLAUSIBLE EXPLANATION: real activations produced by real inputs sit
-near a lower-dimensional "manifold" inside the full representation space.
-A donor swap — however semantically wrong — is still a real, in-
-distribution point near that manifold. Matched-scale random noise is not;
-it points in an essentially arbitrary direction the model never actually
-produces on its own. If that's what's driving the earlier pattern,
-disruption severity should scale with how "in-distribution" the injected
-vector is, not just with its raw magnitude.
+BACKGROUND: in every causal test so far, wherever a significant difference
+appeared, a random-vector control disrupted the model MORE than a real
+donor representation. Hypothesis: real activations sit near a manifold the
+model actually produces; matched-scale noise does not, so disruption should
+scale with how in-distribution the injected vector is.
 
-THREE CONDITIONS, NOT TWO, TO TEST THIS DIRECTLY:
-  1. donor       — a real activation from a DIFFERENT, ON-topic
-                    TruthfulQA question (same as causal_test.py's donor).
-  2. unrelated    — a real activation from an OFF-topic filler sentence:
-                    real text, real activation, no relevance to the
-                    question or to QA-style prompts at all.
-  3. noise        — a random vector matched in scale to the donor's std
-                    (not real at all — the existing control).
+FIVE CONDITIONS, patched at the same prefix-boundary position:
+  donor               real activation, DIFFERENT TruthfulQA question
+                      (same "Q: ...\\nA:" template, same final token)
+  unrelated_template  real activation, OFF-TOPIC question in the SAME
+                      "Q: ...\\nA:" template (same final token, same format)
+  unrelated           real activation from an off-topic plain SENTENCE
+                      (different format AND different final token)
+  shuffled_donor      the donor's own values in RANDOM dimension order
+                      (identical norm and value distribution, no structure)
+  noise               random vector matched in scale to the donor's std
 
-If the on-manifold hypothesis holds: donor < unrelated < noise, in
-disruption severity. If "unrelated" behaves like noise instead of like
-donor, the effect isn't about manifold geometry generally — it's
-something more specific to QA-prompt structure.
+WHY THE 4TH CONDITION EXISTS (a confound in the first version): the plain
+"unrelated" sentences differ from the recipient in FORMAT and in the token
+sitting at the patched position ("." vs the ":" of "A:"), not only in topic.
+So donor < unrelated could reflect token/format mismatch rather than
+manifold distance. unrelated_template isolates topic from format:
+  donor ~= unrelated_template < unrelated < noise  -> the donor/unrelated gap
+      was format/token mismatch, not topical distance.
+  donor < unrelated_template < unrelated < noise   -> disruption tracks
+      distance from the recipient's own context at several levels.
+Either result is informative.
 
-DISRUPTION IS MEASURED TWO WAYS: a continuous magnitude (L2 distance
-between the choice-loglikelihood vectors before and after patching — more
-statistically informative than a binary outcome for ORDERING three
-conditions) and a binary correctness-flip count (for continuity with
-earlier results in this project).
+WHY shuffled_donor EXISTS: separates whether the donor's gentleness comes
+from its SCALE (norm/std) or from dimension-specific STRUCTURE (e.g. the
+few large-magnitude "rogue" dimensions documented in transformer hidden
+states — see Timkey & van Schijndel 2021, and "massive activations" work
+more recently). shuffled_donor keeps the exact same values and scale as
+donor but destroys which value sits in which dimension.
+  donor ~= shuffled_donor  -> scale/value distribution alone explains it,
+      structure doesn't add anything further.
+  donor << shuffled_donor  -> dimension-specific structure matters, not
+      just the set of values present.
 
-VALIDATE BEFORE TRUSTING: run tests/test_causal_test_manifold.py first.
+Disruption = L2 distance between choice-loglik vectors before/after patch
+(continuous, better for ORDERING conditions than a binary flip) plus a
+correctness-flip count for continuity with earlier results.
 """
 
 import random
@@ -50,8 +56,9 @@ from attn_phase.audit.causal_test import (
     predict_answer_patched, capture_prefix_hidden_state,
 )
 
-# Deliberately off-topic, unrelated to trivia/factual-QA content — the
-# "real but presumably off the QA-prompt manifold" condition.
+CONDITIONS = ["donor", "unrelated_template", "unrelated", "shuffled_donor",
+              "noise"]
+
 UNRELATED_FILLER_SENTENCES = [
     "The weather in the mountains changes quickly during autumn.",
     "She poured the tea slowly into a chipped ceramic cup.",
@@ -67,109 +74,115 @@ UNRELATED_FILLER_SENTENCES = [
     "A cat stretched lazily on the warm windowsill.",
 ]
 
+# Off-topic, but in the SAME "Q: ...\nA:" template as real prompts.
+UNRELATED_TEMPLATE_QUESTIONS = [
+    "What time does the bakery on the corner open in the morning?",
+    "How long should I steep green tea before drinking it?",
+    "Which paint is best for a wooden garden fence?",
+    "Why is the highway so quiet on Sunday mornings?",
+    "Where did the children leave their football yesterday?",
+    "What is the best way to wrap a birthday present neatly?",
+    "How often does the evening train usually run late?",
+    "Can a cat sleep comfortably on a narrow windowsill?",
+    "What colour should I choose for my kitchen curtains?",
+    "Is it worth taking an umbrella on a cloudy afternoon?",
+    "How do I keep bread fresh for more than two days?",
+    "Which museum in town has the new painting exhibit?",
+]
 
-def capture_unrelated_vec(model, tokenizer, layer_idx: int, device: str,
-                           rng: random.Random) -> torch.Tensor:
-    """Captures a hidden state from a randomly chosen OFF-topic filler
-    sentence, at that sentence's own final token position — real
-    activation, real text, but unrelated to any TruthfulQA question or
-    even to QA-style prompt structure at all."""
+
+def capture_unrelated_vec(model, tokenizer, layer_idx, device, rng):
+    """Hidden state at the last token of a random off-topic plain sentence."""
     sentence = rng.choice(UNRELATED_FILLER_SENTENCES)
     input_ids = tokenizer.encode(sentence, return_tensors="pt").to(device)
     return capture_hidden_state_from_ids(model, input_ids, layer_idx)
 
 
+def shuffle_vec(vec, rng):
+    """Random permutation of the vector's entries: EXACTLY the same values,
+    norm and std as `vec`, but its dimension-specific structure (e.g. the
+    few large-magnitude 'rogue' dimensions real GPT-2 activations have) is
+    destroyed. Separates 'off-manifold because structure is wrong' from
+    'off-manifold because scale/values are wrong'."""
+    g = torch.Generator().manual_seed(rng.randrange(2 ** 31))
+    perm = torch.randperm(vec.numel(), generator=g).to(vec.device)
+    return vec[perm]
+
+
 def disruption_magnitude(baseline_logliks, patched_logliks) -> float:
-    """L2 distance between the choice-loglikelihood vectors before and
-    after patching. A continuous measure of how much a patch disrupted
-    the model's scoring, independent of whether it happened to flip the
-    argmax choice — flips are a coarse, noisy signal for ORDERING three
-    conditions by severity; this isn't."""
     a = np.array(baseline_logliks)
     b = np.array(patched_logliks)
     return float(np.linalg.norm(a - b))
 
 
-def run_manifold_test(model, tokenizer, question_pool: list, layer_idx: int,
-                       device: str, n_questions: int = 50, seed: int = 0,
-                       mode: str = "single", verbose: bool = True) -> dict:
-    """
-    For each of `n_questions` sampled recipients, patches the SAME
-    prefix-boundary position with three different vectors (donor,
-    unrelated, noise) and compares disruption severity across all three,
-    both as a continuous magnitude and as a correctness-flip count.
+def _safe_wilcoxon(a, b):
+    if all(x == y for x, y in zip(a, b)):
+        return 1.0
+    return float(wilcoxon(a, b).pvalue)
 
-    `mode`: "single" or "range", same meaning as in causal_test.py —
-    defaults to "single" to match the layer/mode combination already
-    reported in the findings doc, for direct comparability.
-    """
+
+_PAIRS = [
+    ("donor", "unrelated_template"),
+    ("unrelated_template", "unrelated"),
+    ("donor", "unrelated"),
+    ("unrelated", "noise"),
+    ("donor", "noise"),
+    ("donor", "shuffled_donor"),
+    ("shuffled_donor", "noise"),
+]
+
+
+def run_manifold_test(model, tokenizer, question_pool, layer_idx, device,
+                      n_questions=50, seed=0, mode="single", verbose=True):
+    """Patch each sampled recipient's prefix position with all four vector
+    types and compare disruption. `mode`: "single" or "range" (as in
+    causal_test.py)."""
     from attn_phase.audit.activations import predict_answer
 
     rng = random.Random(seed)
     n_questions = min(n_questions, len(question_pool))
     recipients = rng.sample(question_pool, n_questions)
+    # separate RNG for the shuffle so adding this condition does NOT change
+    # which donors / filler texts the other conditions draw for a given seed
+    shuffle_rng = random.Random(seed + 1)
 
-    donor_mags, unrelated_mags, noise_mags = [], [], []
-    donor_flips, unrelated_flips, noise_flips = 0, 0, 0
+    mags = {c: [] for c in CONDITIONS}
+    flips = {c: 0 for c in CONDITIONS}
 
     for i, recipient in enumerate(recipients):
-        baseline_result = predict_answer(model, tokenizer, recipient, device)
-        baseline_logliks = baseline_result["choice_logliks"]
-        baseline_correct = baseline_result["correct"]
+        base = predict_answer(model, tokenizer, recipient, device)
 
-        candidates = [q for q in question_pool if q is not recipient]
-        donor_q = rng.choice(candidates)
-        donor_vec = capture_prefix_hidden_state(
-            model, tokenizer, donor_q.question, layer_idx, device)
-        unrelated_vec = capture_unrelated_vec(
-            model, tokenizer, layer_idx, device, rng)
-        noise_vec = torch.randn_like(donor_vec) * donor_vec.std()
+        donor_q = rng.choice([q for q in question_pool if q is not recipient])
+        template_q = rng.choice(UNRELATED_TEMPLATE_QUESTIONS)
+        vecs = {
+            "donor": capture_prefix_hidden_state(
+                model, tokenizer, donor_q.question, layer_idx, device),
+            "unrelated_template": capture_prefix_hidden_state(
+                model, tokenizer, template_q, layer_idx, device),
+            "unrelated": capture_unrelated_vec(
+                model, tokenizer, layer_idx, device, rng),
+        }
+        vecs["shuffled_donor"] = shuffle_vec(vecs["donor"], shuffle_rng)
+        noise_rng = torch.Generator().manual_seed(shuffle_rng.randrange(2 ** 31))
+        noise = torch.randn(vecs["donor"].shape, generator=noise_rng)
+        vecs["noise"] = noise.to(vecs["donor"].device) * vecs["donor"].std()
 
-        donor_result = predict_answer_patched(
-            model, tokenizer, recipient, layer_idx, donor_vec, device,
-            mode=mode)
-        unrelated_result = predict_answer_patched(
-            model, tokenizer, recipient, layer_idx, unrelated_vec, device,
-            mode=mode)
-        noise_result = predict_answer_patched(
-            model, tokenizer, recipient, layer_idx, noise_vec, device,
-            mode=mode)
-
-        donor_mags.append(disruption_magnitude(
-            baseline_logliks, donor_result["choice_logliks"]))
-        unrelated_mags.append(disruption_magnitude(
-            baseline_logliks, unrelated_result["choice_logliks"]))
-        noise_mags.append(disruption_magnitude(
-            baseline_logliks, noise_result["choice_logliks"]))
-
-        donor_flips += int(donor_result["correct"] != baseline_correct)
-        unrelated_flips += int(unrelated_result["correct"] != baseline_correct)
-        noise_flips += int(noise_result["correct"] != baseline_correct)
+        for cond, vec in vecs.items():
+            res = predict_answer_patched(model, tokenizer, recipient,
+                                         layer_idx, vec, device, mode=mode)
+            mags[cond].append(disruption_magnitude(
+                base["choice_logliks"], res["choice_logliks"]))
+            flips[cond] += int(res["correct"] != base["correct"])
 
         if verbose and (i + 1) % 10 == 0:
             print(f"  ... {i + 1}/{n_questions} recipients tested")
 
-    def _safe_wilcoxon(a, b):
-        if all(x == y for x, y in zip(a, b)):
-            return 1.0
-        return float(wilcoxon(a, b).pvalue)
-
     return {
         "n_questions": n_questions,
-        "mean_disruption": {
-            "donor": float(np.mean(donor_mags)),
-            "unrelated": float(np.mean(unrelated_mags)),
-            "noise": float(np.mean(noise_mags)),
-        },
-        "flip_counts": {
-            "donor": donor_flips,
-            "unrelated": unrelated_flips,
-            "noise": noise_flips,
-        },
         "n_pairs": n_questions,
-        "wilcoxon_p": {
-            "donor_vs_unrelated": _safe_wilcoxon(donor_mags, unrelated_mags),
-            "unrelated_vs_noise": _safe_wilcoxon(unrelated_mags, noise_mags),
-            "donor_vs_noise": _safe_wilcoxon(donor_mags, noise_mags),
-        },
+        "mean_disruption": {c: float(np.mean(mags[c])) for c in CONDITIONS},
+        "flip_counts": flips,
+        "wilcoxon_p": {f"{a}_vs_{b}": _safe_wilcoxon(mags[a], mags[b])
+                       for a, b in _PAIRS},
+        "raw_disruption": {c: list(v) for c, v in mags.items()},
     }

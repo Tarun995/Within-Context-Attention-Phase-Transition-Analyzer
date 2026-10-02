@@ -34,7 +34,8 @@ import torch
 
 
 def _get_block_module(model, layer_idx: int):
-    return model.transformer.h[layer_idx]
+    from attn_phase.audit.model_adapter import get_block_module
+    return get_block_module(model, layer_idx)
 
 
 # ---------------------------------------------------------------------------

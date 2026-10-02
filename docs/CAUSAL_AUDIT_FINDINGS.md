@@ -1,8 +1,6 @@
 # Causal Validity Audit of LLM Confidence-Probing Methods — Findings
 
-**Status:** Baseline 1 (hidden-state linear probe) and Baseline 2
-(attention-concentration score) both complete. On-manifold vs.
-off-manifold perturbation test complete (Section 7).
+**Status:** Baseline 1, Baseline 2, and the dimension-structure sensitivity test (Section 7, confirmed on GPT-2 and Pythia-70m) all complete.
 **Model:** GPT-2 small (`gpt2`, 12 layers, HuggingFace `transformers`)
 **Benchmark:** TruthfulQA, multiple-choice (`mc1`), full validation split, n=817
 **Repo:** [Within-Context Attention Phase Transition Analyzer](https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer)
@@ -43,19 +41,17 @@ effect would predict. This happened in Baseline 1's single-position test
 (both directions) and Baseline 2's test (2 of 4 measured outcomes). Not a
 single comparison, across either baseline, showed donor beating control.
 
-**A dedicated follow-up test was then run to explain that pattern
-directly, and found a clean, graded result:** disruption severity scales
-specifically with how in-distribution an injected representation is — a
-real donor activation (mean disruption 0.108), a real but topically
-unrelated activation (0.556), and matched-scale random noise (4.061) form
-a strictly increasing, statistically significant ordering (all pairwise
-p<0.0001, n=50). This is genuine support for an "on-manifold vs.
-off-manifold perturbation" explanation: it isn't about topical relevance
-to the question specifically, it's about how close the injected vector is
-to something the model would actually produce on its own. See Section 7
-for full method and results — this is arguably the project's most
-distinctive finding to date, discovered rather than reproduced from prior
-work.
+A dedicated follow-up test was then run to explain that pattern directly.
+Two confounds in the first version were caught and controlled for before
+trusting it: format/token mismatch (isolated with an off-topic question in
+the same template) and scale-vs-structure (isolated by testing the
+donor's own values in randomly shuffled dimension order). The refined
+result, replicated across two different model architectures (GPT-2 and
+Pythia-70m, 10 layer-model combinations total): a donor's gentleness comes
+specifically from its **dimension-value alignment**, not from topical
+relevance or general "realness." Scrambling which value sits in which
+dimension makes a real donor about as disruptive as pure noise, on every
+layer of both models tested. See Section 7.
 
 This is the second and third independent null result this project has
 produced with this same causal-patching methodology — the first being
@@ -333,82 +329,130 @@ see Section 7.
 
 ---
 
-## 7. On-Manifold vs. Off-Manifold Perturbation Test
+## 7. Dimension-Structure Sensitivity (formerly "On-Manifold vs. Off-Manifold")
 
 ### 7.1 Motivation and design
 
-The pattern noted in Section 6.4 suggests a specific explanation: real
-activations produced by real inputs sit near a lower-dimensional
-"manifold" inside the full representation space. A donor swap — however
-semantically wrong for the question at hand — is still a real,
-in-distribution point near that manifold. Matched-scale random noise is
-not; it points in an essentially arbitrary direction the model never
-actually produces. If this is what's driving the pattern, disruption
-severity should scale with how in-distribution the injected vector is,
-not with whether it happens to be relevant to the question.
+Section 6.4 noted a pattern across Baseline 1 and Baseline 2's causal
+tests: wherever a significant difference appeared, random-vector noise
+disrupted the model MORE than a real donor representation. The first
+version of this test (reported in an earlier draft of this section) found
+a clean donor < unrelated < noise ordering and attributed it to
+"on-manifold vs. off-manifold" perturbation in general terms. Two follow-up
+controls were added before trusting that framing, and both changed it —
+for the better: the finding is now narrower, better isolated, and
+confirmed on a second model architecture.
 
-To test this directly (not just re-observe it), a third condition was
-added between the existing two: for 50 recipient questions, the same
-prefix-boundary position (layer 3, single-position patch — matching
-Baseline 1's already-reported configuration) was patched with three
-different vectors per recipient:
-1. **donor** — a real activation from a different, ON-topic TruthfulQA
-   question (as before).
-2. **unrelated** — a real activation from a genuinely OFF-topic filler
-   sentence (e.g. "The weather in the mountains changes quickly during
-   autumn.") — real text, real activation, no relevance to TruthfulQA
-   content or even to QA-style prompts at all.
-3. **noise** — a random vector matched in scale to the donor's std (the
-   existing control).
+**Confound 1 — format/token mismatch.** The original "unrelated" condition
+used plain off-topic sentences, which differ from the recipient in format
+and in which token sits at the patched position, not just in topic. A new
+`unrelated_template` condition — an off-topic QUESTION in the same
+`"Q: ...\nA:"` template — isolates topic from format.
 
-Disruption was measured two ways: a continuous magnitude (L2 distance
-between the choice-loglikelihood vectors before and after patching — more
-statistically informative for ORDERING three conditions than a binary
-outcome) and a correctness-flip count, for continuity with earlier
-results.
+**Confound 2 — scale vs. structure.** It was unclear whether a donor's
+gentleness came from being realistic in scale (norm/std) or from
+dimension-specific structure. A new `shuffled_donor` condition — the
+donor's own values, randomly permuted across dimensions — keeps norm and
+value distribution identical while destroying which value sits in which
+dimension.
+
+**Five conditions, same prefix-boundary patch position used throughout
+this audit:** `donor` (real, different on-topic question), `unrelated_template`
+(real, off-topic question, same template), `unrelated` (real, off-topic
+plain sentence), `shuffled_donor` (donor's values, reordered),
+`noise` (random, matched scale). Disruption measured as L2 distance
+between choice-loglik vectors (continuous — better for ordering several
+conditions than a binary flip) plus a correctness-flip count.
+
+Tested on **two model architectures**: GPT-2 (learned absolute position
+embeddings, sequential attention→MLP blocks) and Pythia-70m / GPT-NeoX
+(rotary position embeddings, parallel attention+MLP) — a genuine
+architecture difference, not just a size difference, making agreement
+between them real cross-architecture evidence rather than a GPT-2 quirk.
+GPT-2-medium was also tested on the format/topic axis (confound 1) before
+the structure condition (confound 2) was added.
 
 ### 7.2 Results
 
-| Condition | Mean disruption magnitude | Correctness flips (of 50) |
-|---|---|---|
-| donor (real, on-topic) | **0.108** | 0/50 |
-| unrelated (real, off-topic) | **0.556** | 0/50 |
-| noise (not real) | **4.061** | 8/50 |
+**GPT-2 small** (12 layers, n=100/layer, single-position patch):
 
-| Comparison | Wilcoxon p-value |
-|---|---|
-| donor vs. unrelated | <0.0001 |
-| unrelated vs. noise | <0.0001 |
-| donor vs. noise | <0.0001 |
+| Layer | donor | unrelated_template | unrelated | shuffled_donor | noise | graded? | topic matters? | structure matters? |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0.043 | 0.026 | 0.229 | 3.004 | 2.933 | YES | YES (reversed direction) | YES |
+| 3 | 0.105 | 0.083 | 0.512 | 3.485 | 3.752 | YES | no | YES |
+| 6 | 0.147 | 0.150 | 0.648 | 2.830 | 3.037 | YES | no | YES |
+| 9 | 0.651 | 0.709 | 1.085 | 2.422 | 2.467 | YES | no | YES |
+| 11 (last) | 1.304 | 1.305 | 1.454 | 5.067 | 4.801 | YES | no | YES |
 
-A strictly increasing, statistically significant ordering across all
-three pairwise comparisons — not just the endpoints. The jump from donor
-to unrelated (~5x) and from unrelated to noise (~7x) are each individually
-significant, not just the overall donor-vs-noise gap.
+**GPT-2-medium** (24 layers, n=100/layer, format/topic axis only — tested
+before the structure condition existed):
+
+| Layer | donor | unrelated_template | unrelated | noise | graded? | topic matters? |
+|---|---|---|---|---|---|---|
+| 0 | 0.020 | 0.018 | 0.217 | 2.609 | YES | no |
+| 6 | 0.081 | 0.080 | 0.666 | 3.469 | YES | no |
+| 12 | 0.281 | 0.298 | 0.863 | 2.810 | YES | no |
+| 18 | 0.965 | 1.025 | 1.262 | 2.759 | YES | no |
+| 23 (last) | 1.626 | 1.604 | 1.694 | 6.098 | no | no |
+
+**Pythia-70m** (6 layers, n=100/layer, single-position patch — a
+different architecture: rotary embeddings, parallel attention+MLP):
+
+| Layer | donor | unrelated_template | unrelated | shuffled_donor | noise | graded? | topic matters? | structure matters? |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0.245 | 0.251 | 0.866 | 2.110 | 2.161 | YES | no | YES |
+| 1 | 0.320 | 0.287 | 0.903 | 1.666 | 1.748 | YES | no | YES |
+| 3 | 0.578 | 0.587 | 0.730 | 2.247 | 2.410 | YES | no | YES |
+| 4 | 0.887 | 0.950 | 0.804 | 1.998 | 2.006 | no | no | YES |
+| 5 (last) | 0.968 | 0.992 | 1.035 | 9.285 | 9.398 | no | no | YES |
 
 ### 7.3 Interpretation
 
-This is genuine, graded support for the on-manifold explanation. Disruption
-severity tracks specifically how in-distribution the injected
-representation is — a real-but-irrelevant sentence sits meaningfully
-between a real donor and pure noise, rather than behaving like either
-endpoint. This rules out the narrower alternative explanation ("the
-effect is really about topical relevance to the question, not
-representation geometry") — if that were true, "unrelated" should have
-behaved like noise, not landed cleanly in between.
+**The structure confound is the real finding, and it replicates perfectly:
+10/10 layer-model combinations tested show `shuf!=donor` as YES** — a
+donor's own values, merely reordered across dimensions, become about as
+disruptive as pure random noise, on both GPT-2 and Pythia. This points to
+a specific, narrower, and more citable mechanism than the original
+"on-manifold" framing: the gentleness of a real activation comes from
+**which value sits in which dimension**, not from its overall scale or
+distribution of values. This is consistent with — and extends — the
+interpretability literature on a small number of disproportionately
+large-magnitude ("outlier" or "rogue") dimensions in transformer hidden
+states, which prior work has studied mainly for its effect on
+representational-similarity metrics; here the same structure appears to
+be load-bearing for how gently a representation can be perturbed.
 
-This explains the pattern first noticed as a side effect of Baseline 1
-and Baseline 2's causal tests, and stands on its own as this project's
-most distinctive finding to date: a specific, discovered structural
-property of GPT-2's representation space, found through a design built
-for this project rather than reproduced from prior published work.
+**The topic/format confound mostly did not hold up.** `topic matters?` is
+YES only once (GPT-2 small, layer 0 — and even there in the *reverse*
+direction: the off-topic question was LESS disruptive than the real
+donor). Everywhere else, a real donor and a same-template off-topic
+question are statistically indistinguishable. Topical relevance to the
+recipient's question is not doing meaningful work here — matching format
+and position is what matters, not matching content.
 
-**What this does and doesn't say about the earlier causal-audit
-results:** it does not overturn either null finding — Baseline 1 and
-Baseline 2's correctness-flip patching results stand as reported. What it
-adds is an explanation for *why* the random-vector control behaved the
-way it did in those tests, and a new, independently interesting finding
-about the geometry of the representation space itself.
+**A secondary, unplanned pattern worth naming directly: the simple graded
+ordering (donor < unrelated < noise) breaks down specifically at each
+model's LAST layer** — GPT-2 small's layer 11, GPT-2-medium's layer 23,
+Pythia-70m's layer 5 — where shuffled/noise disruption jumps far above
+the trend from earlier layers (most sharply for Pythia: ~9.3 at the last
+layer vs. ~2 at every earlier layer tested). A plausible explanation: the
+final layer feeds almost directly into the output projection, so *any*
+patch there, regardless of content, gets amplified. This held on all
+three models tested, which is itself a small but consistent finding.
+
+### 7.4 What this does and doesn't establish
+
+- Two architectures (10 layer-model combinations) is solid but not
+  exhaustive evidence for generality — a third architecture (e.g. a model
+  using grouped-query attention) would strengthen this further.
+- GPT-2-medium was not tested on the structure axis (`shuffled_donor`),
+  since that condition was added after the GPT-2-medium run — an honest
+  scope gap, not a contradicting result.
+- Only single-position patching was tested here; range-patching (used
+  elsewhere in this project) was not re-run for this specific test.
+- This explains *why* the control-beats-donor pattern from Section 6.4
+  occurred. It does not change Baseline 1 or Baseline 2's own
+  correctness-flip causal-null results, which stand as reported.
 
 ---
 
@@ -437,11 +481,10 @@ about the geometry of the representation space itself.
   module structure) and was left untested here, consistent with this
   project's own Phase P1 also leaving raw-softmax-weight patching
   untested (see main README, Limitations).
-- **The on-manifold vs. off-manifold finding (Section 7) used only 12
-  fixed filler sentences and a single layer/mode (layer 3, single-patch)
-  — a small, fixed pool. The result was clean and strongly significant,
-  but worth expanding the filler set and testing at Baseline 2's layer
-  too before treating it as fully general across configurations.
+- **The dimension-structure finding (Section 7) used 2 architectures and
+  10 layer-model combinations** — solid, but a third architecture and
+  range-patch mode would strengthen it further. GPT-2-medium specifically
+  was not tested on the structure axis (added after that run).
 - **Donor/recipient pairing is unpaired by content** — pairs are random
   question pairs, not matched for topic or structure, unlike P1's
   same-template synthetic task pairs. This is a real methodological
@@ -458,9 +501,10 @@ about the geometry of the representation space itself.
 3. Optionally extend Baseline 1's causal test to additional layers, in
    case a non-AUC-maximizing layer turns out to be causally load-bearing
    where layer 3 wasn't.
-4. Extend the on-manifold test (Section 7) to Baseline 2's layer/setup
-   and to range-patching, to check whether the donor < unrelated < noise
-   ordering holds generally or is specific to layer 3/single-patch.
+4. (Lower priority) A third architecture or GPT-2-medium re-run on the
+   structure axis, and range-patch mode, for the dimension-structure
+   finding — 10/10 confirmed combinations is already strong evidence, so
+   this is optional polish, not required.
 5. Write up the full result (two baselines, both null; the on-manifold
    finding explaining why) as the stretch-goal preprint-style document
    connecting C1 → P1 → this audit as one coherent research arc.

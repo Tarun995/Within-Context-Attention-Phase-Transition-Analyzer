@@ -27,7 +27,7 @@ This project is built specifically to not stop there.
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
 | **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No** — same null pattern on 2 independent methods, on a real benchmark |
-| **On-Manifold Test** | *Why* did every causal test's random-noise control disrupt the model more than a real donor swap? | Three-way patch comparison: real-relevant vs. real-unrelated vs. random noise | **Graded, significant ordering** (donor < unrelated < noise, all p<0.0001) — disruption tracks how in-distribution the injected representation is |
+| **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure, not topic** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
 Two structurally different signals, on two different task families, both predicting
 behavior without demonstrably causing it — found with the same rigor each time: pre-register
@@ -128,17 +128,17 @@ pattern showed up across every causal test run so far, worth its own mention: wh
 significant difference appeared, **random noise disrupted the model more than the real donor
 representation did** — the opposite of what a causal effect would predict.
 
-**That pattern was then investigated directly, not just noted, with a dedicated three-way
-test:** for 50 recipient questions, the same position was patched with a real, on-topic donor
-activation; a real but topically *unrelated* activation (a filler sentence like "The weather
-in the mountains changes quickly during autumn."); and matched-scale random noise. Disruption
-severity formed a strictly increasing, statistically significant ordering — **donor (0.108) <
-unrelated (0.556) < noise (4.061)**, all three pairwise comparisons p<0.0001. This is genuine,
-graded evidence for an *on-manifold vs. off-manifold* explanation: disruption tracks how
-in-distribution an injected representation is, not whether it happens to be relevant to the
-question. This is arguably the project's most distinctive finding to date — discovered through
-a test designed for this project, not reproduced from prior published work. Full results in
-[`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Sections 6–7.
+**That pattern was then investigated directly, with two confounds caught
+and controlled for before trusting the result:** format/token mismatch,
+and whether gentleness comes from scale or from dimension-specific
+structure. The refined finding, confirmed across GPT-2 and Pythia-70m (a
+genuinely different architecture — rotary embeddings, parallel
+attention+MLP): a real donor's gentleness comes from **which value sits
+in which dimension**, not from topical relevance or realness in general.
+Scrambling a donor's own values across dimensions makes it about as
+disruptive as pure noise, on every layer of both models tested (10/10
+combinations). Full results in
+[`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Section 7.
 
 ## Why the C1 result can be trusted
 
