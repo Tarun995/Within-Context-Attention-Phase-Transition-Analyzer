@@ -154,6 +154,11 @@ evidence that `post_plateau_var`, while a real and statistically significant cor
 solving (C1), is **not causally driven by this layer's attention output** — at least not
 in a way this patching design can detect.
 
+**Power note:** with 5 pairs per direction (10 total), 0/10 shifts rules out a
+true shift rate above roughly 30% (95% upper bound, rule of three). It is an
+informative null but not a precise one; read it as "no effect detected". A
+larger pair count would tighten it.
+
 **Scope, stated explicitly rather than implied:** this rules out the last layer's
 attention-output component specifically, tested via a next-token-prediction proxy. It does
 not test earlier layers, other components (MLP outputs, individual attention heads), or
@@ -174,6 +179,8 @@ not run to go looking for a positive result.
 - Head-level ablation to identify which attention heads drive the `post_plateau_var` signal
 - Larger model comparisons (GPT-2 medium/large, other model families)
 - Broader seed coverage beyond base seed 42
+- ~~Extend the same causal test to published confidence-probing methods~~ — **done, see
+  [`CAUSAL_AUDIT_FINDINGS.md`](CAUSAL_AUDIT_FINDINGS.md)**
 - Layerwise propagation analysis of the plateau signal across all 12 layers, properly
   Bonferroni-corrected from the start (avoiding a repeat of the layer-10 false positive)
 

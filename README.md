@@ -29,15 +29,17 @@ This project is built specifically to not stop there.
 | **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No** — same null pattern on 2 independent methods, on a real benchmark |
 | **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure, not topic** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
-Two structurally different signals, on two different task families, both predicting
+Three structurally different signals (a synthetic-task attention metric, a hidden-state probe,
+and an attention-concentration score), on two different task families, each predicting
 behavior without demonstrably causing it — found with the same rigor each time: pre-register
 what counts as a positive result before running it, verify the intervention mechanism itself
 before trusting any result from it, and report null findings as first-class, not as failures
 to hide. Along the way, a pattern showed up that wasn't hypothesized in advance — random-noise
 controls consistently disrupting the model more than real donor swaps — and rather than just
-noting it, a dedicated follow-up test confirmed a specific, graded explanation for it (see
+noting it, a dedicated follow-up test traced it to a narrower explanation (dimension structure, not topic) (see
 "Is a published confidence-probing method causally valid?" below). **Where this is headed
-next:** a second benchmark (TriviaQA) and a model-scaling check. See "Roadmap" below.
+next:** an outlier-dimension test (which dimensions carry the structure?), a second
+benchmark (TriviaQA), and a model-scaling check. See "Roadmap" below.
 
 ## Headline result (GPT-2 small, Phase C1)
 
@@ -105,13 +107,19 @@ Two activation-patching causal tests, of increasing strength, were then run on t
 signal: single-position patching (only the final prompt-prefix token) and range patching
 (every prefix token, closing the bypass where the model could still read the untouched
 question directly). Both included a random-vector control and McNemar's test on the paired
-outcomes, not just a raw flip count. **Both tests returned a null result** — donor-patched
-flip rates were statistically indistinguishable from random-vector disruption in every
-condition tested (all p > 0.025, Bonferroni-corrected for 2 directions).
+outcomes, not just a raw flip count. **Neither test showed a causal effect** — the donor never
+flipped correctness more often than the random-vector control, in any condition. Range
+patching: donor and control were indistinguishable (p = 1.0 and p = 0.65). Single-position
+patching: the donor flipped 0/50 in both directions, and in one direction (correct→incorrect)
+the random control flipped significantly *more* (16/50 vs 0/50, p < 0.0001); the other
+direction (6/50 vs 0/50, p = 0.031) is nominal only against the Bonferroni threshold of 0.025.
 
 **Honest reading:** the layer-3 signal that predicts correctness with AUC 0.83 does not
 appear to be part of the mechanism that produces correctness, at either intervention
-strength tested. This is the second independent null result this project has produced with
+strength tested. The single-position test is the weaker of the two: a real donor at that one
+position barely moves the model's scores at all (see Section 7 of the findings doc), so 0/50
+donor flips there only rules out a true flip rate above roughly 6%. The range-patch result
+carries most of the weight. This is the second independent null result this project has produced with
 this same causal-patching methodology — the first being `post_plateau_var` in Phase P1, a
 structurally different signal on a different task family. Full method, statistics, and
 limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
@@ -137,7 +145,8 @@ attention+MLP): a real donor's gentleness comes from **which value sits
 in which dimension**, not from topical relevance or realness in general.
 Scrambling a donor's own values across dimensions makes it about as
 disruptive as pure noise, on every layer of both models tested (10/10
-combinations). Full results in
+combinations). *Why* that is — for example, whether a few large-magnitude "outlier"
+dimensions carry the structure — is an untested hypothesis. Full results in
 [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Section 7.
 
 ## Why the C1 result can be trusted
@@ -202,7 +211,9 @@ python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50
 python run_causal_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50 --mode range
 python run_attention_score_probe_multilayer.py --device cuda --n 817   # baseline 2 probe
 python run_causal_test_concentration.py --device cuda --layer 1 --n-questions 817 --n-pairs 50
-python run_manifold_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50   # on-manifold test
+python run_manifold_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50   # 5-condition test, one layer
+python run_manifold_sweep.py --model gpt2 --device cuda --n-pairs 100                  # 5-condition test, layer sweep
+python run_manifold_sweep.py --model EleutherAI/pythia-70m --device cuda --n-pairs 100
 ```
 
 Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
@@ -234,13 +245,15 @@ attention-phase-analyzer/
             causal_test.py                               # donor/recipient causal test, single + range
             attention_score.py                            # Baseline 2: attention-concentration score
             causal_test_concentration.py                   # Baseline 2's causal test
-            causal_test_manifold.py                          # on-manifold vs off-manifold perturbation test
+            causal_test_manifold.py                          # five-condition dimension-structure test
+            model_adapter.py                                  # GPT-2 / GPT-NeoX block lookup, auto layer choice
     verify_audit_pipeline.py        # Causal Audit: Baseline 1 probe + layer sweep
     run_causal_test.py               # Causal Audit: Baseline 1 causal test runner
     run_attention_score_probe_multilayer.py   # Causal Audit: Baseline 2 probe (multi-layer)
     run_causal_test_concentration.py           # Causal Audit: Baseline 2 causal test runner
-    run_manifold_test.py                        # Causal Audit: on-manifold vs off-manifold test runner
-    tests/                        # 60+ tests: tasks, metrics, answer-matching, stats, patching,
+    run_manifold_test.py                        # Causal Audit: five-condition test, single layer
+    run_manifold_sweep.py                        # Causal Audit: five-condition test, layer sweep (any supported model)
+    tests/                        # about 100 tests: tasks, metrics, answer-matching, stats, patching,
                                   # plus the Causal Audit phase's own hook/probe/patch tests
     docs/FINDINGS.md                # full research narrative, incl. bugs found + P1 causal test
     docs/CAUSAL_AUDIT_FINDINGS.md    # Causal Audit phase: probe reproduction + causal test results
@@ -253,7 +266,7 @@ attention-phase-analyzer/
 python -m pytest tests/ -v
 ```
 
-60+ tests cover task generation, metric correctness on synthetic curves with known
+About 100 tests cover task generation, metric correctness on synthetic curves with known
 properties, answer-matching regression cases, statistical direction-labeling (added after
 Bug #3), and the Phase P1 patch-hook mechanism itself (`test_patch.py` — verifies the hook
 actually intervenes in the forward pass rather than silently no-op'ing, since a broken hook
@@ -271,8 +284,10 @@ same block's output (only a later layer's can).
 ## Limitations
 
 - Single model tested end-to-end so far (GPT-2 small, 117M params); the CLI supports any
-  HuggingFace causal LM but larger-model results are not yet reported.
-- CPU-only run shown; not benchmarked for GPU throughput.
+  HuggingFace causal LM but larger-model results are not yet reported. The dimension-structure
+  test additionally covers Pythia-70m (and GPT-2-medium on the topic axis only).
+- Phase C1 and P1 were run on CPU; the Causal Audit runs used a consumer GPU (RTX 2050, 4 GB).
+  Not benchmarked for throughput.
 - One base seed (42) with 5 derived instances per task type — broader seed coverage is
   planned (see Future Work in FINDINGS.md).
 - The `mod_arith_m10_d1` task type appears in *both* the solved and failed groups across
@@ -287,7 +302,9 @@ same block's output (only a later layer's can).
   concentration score), one benchmark (TruthfulQA mc1), one model (GPT-2 small), and only
   each method's own best-AUC layer.** Baseline 2's correlational signal was weak to begin
   with (AUC 0.54), so its causal null carries less evidential weight than Baseline 1's
-  (which started from a clearly real AUC-0.83 signal). See
+  (which started from a clearly real AUC-0.83 signal). Null means "no effect detected", not
+  "no effect": with 50 pairs per direction, 0 donor flips only rules out a true flip rate above
+  roughly 6%. See
   `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full list of what these results do
   and don't establish.
 
@@ -298,11 +315,12 @@ same block's output (only a later layer's can).
 - **Broader layer coverage for the causal test** — only the AUC-sweep peak layer has been
   causally tested for each baseline so far; a signal could in principle be load-bearing at a
   different layer even where the AUC-maximizing one isn't.
-- **Extend the on-manifold test** to Baseline 2's layer/setup and to range-patching, to check
-  whether the donor < unrelated < noise ordering holds generally or is specific to the
-  layer-3/single-patch configuration it was first found in.
-- **Model scaling** — Pythia at small-to-medium sizes, to check whether the pattern found in
-  GPT-2 small holds as scale increases.
+- **Outlier-dimension test** — the dimension-structure result shows *that* a donor's
+  value-to-dimension placement matters, not *which* dimensions carry it. Shuffle or preserve
+  only the largest-magnitude dimensions versus the rest to find out. Then extend the
+  five-condition test to range patching and to GPT-2-medium's structure axis.
+- **Model scaling** — Baselines 1 and 2 (probe and causal tests) on Pythia / GPT-2-medium; so
+  far only the dimension-structure test has been run beyond GPT-2 small.
 - **Stretch: a short technical write-up** connecting C1 → P1 → Causal Audit as one coherent
   research arc, now that both baseline methods have a result.
 

@@ -1,6 +1,6 @@
 # Causal Validity Audit of LLM Confidence-Probing Methods — Findings
 
-**Status:** Baseline 1, Baseline 2, and the dimension-structure sensitivity test (Section 7, confirmed on GPT-2 and Pythia-70m) all complete.
+**Status:** Baseline 1, Baseline 2, and the dimension-structure sensitivity test (Section 7, confirmed on GPT-2 and Pythia-70m) all complete. The outlier-dimension explanation for Section 7 is an open hypothesis.
 **Model:** GPT-2 small (`gpt2`, 12 layers, HuggingFace `transformers`)
 **Benchmark:** TruthfulQA, multiple-choice (`mc1`), full validation split, n=817
 **Repo:** [Within-Context Attention Phase Transition Analyzer](https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer)
@@ -38,7 +38,9 @@ far, worth noting on its own: **wherever a statistically significant
 difference appeared, the random-vector CONTROL disrupted the model more
 than the real donor representation did** — the opposite of what a causal
 effect would predict. This happened in Baseline 1's single-position test
-(both directions) and Baseline 2's test (2 of 4 measured outcomes). Not a
+(one direction significant after correction, p<0.0001; the other nominal only, p=0.031
+against a 0.025 threshold) and Baseline 2's test (2 of 4 measured outcomes, both
+corrected-significant). Not a
 single comparison, across either baseline, showed donor beating control.
 
 A dedicated follow-up test was then run to explain that pattern directly.
@@ -63,7 +65,7 @@ is the emerging pattern this audit is built to test for.
 
 ## 2. Motivation
 
-A literature check (see `CAUSAL_AUDIT_PROJECT_PLAN.md`) found that
+A literature check at the start of this phase found that
 internal-state signals predicting LLM correctness/confidence are an
 actively developed and even commercialized area — but every method found
 is validated correlationally. None test whether the signal is causally
@@ -185,8 +187,10 @@ every position in the slice.
 Donor flip rate was **0% in both directions** — transplanting a real
 "confident" representation from a different question never changed the
 recipient's answer. Notably, the *control* (random noise) flipped
-correctness significantly more often than the real donor vector did in
-both directions — the opposite of what a causal effect would predict.
+correctness more often than the real donor vector did in
+both directions — the opposite of what a causal effect would predict. Only
+correct→incorrect survives Bonferroni correction (threshold 0.025);
+incorrect→correct (p=0.0312) is nominal only.
 
 ### 4.2 Range patch (layer 3, n=50 pairs/direction)
 
@@ -226,13 +230,23 @@ at two escalating strengths specifically to rule out "the intervention
 just wasn't strong enough" as an explanation, and the pattern (donor ≈
 control, in both directions, at both strengths) held throughout.
 
+**Caveat added after the Section 7 results.** The single-position test is the
+weaker of the two. Section 7 shows that a real donor injected at that one
+position barely moves the model's choice scores (mean L2 disruption about
+0.1 at GPT-2 small layer 3), and a same-template off-topic question is just as
+gentle. So a 0/50 donor flip rate there is partly what a near no-op patch
+would produce, and it only rules out a true flip rate above roughly 6% (95%
+upper bound, rule of three). The range-patch result, where donor and control
+flip rates are both large and indistinguishable, carries most of the weight.
+"No effect detected" is the accurate description, not "no effect".
+
 Combined with Phase P1's independent null result for `post_plateau_var`
 (different signal, different task family, same last-layer patching
 methodology), this project has now found the same qualitative result
 twice: a signal that predicts model behavior without demonstrably causing
-it. Neither literature-reported confidence-probing methods nor this
-project's own attention-derived metric survive a causal test, on the
-evidence gathered so far.
+it. Neither the literature-reported confidence-probing method tested here nor
+this project's own attention-derived metric showed a causal effect under
+these tests, on the evidence gathered so far.
 
 ---
 
@@ -308,10 +322,13 @@ a random-vector control and McNemar's test:
 | donor=LOW → recipient=HIGH | Concentration shift | 0% (0/50) | 0% (0/50) | 1.0000 |
 | donor=LOW → recipient=HIGH | Correctness flip | 2% (1/50) | 30% (15/50) | 0.0001 |
 
-Three of the four outcomes reached significance (p < 0.025,
-Bonferroni-corrected for 2 directions) — and in every significant case,
-**control exceeded donor**, the opposite of what a causal effect would
-predict. The fourth outcome (concentration shift, low→high direction) was
+Two of the four outcomes reached significance (p < 0.025,
+Bonferroni-corrected for 2 directions): the concentration shift in the
+HIGH→LOW direction (p=0.0078) and the correctness flip in the LOW→HIGH
+direction (p=0.0001). In both, **control exceeded donor**, the opposite of
+what a causal effect would predict. The HIGH→LOW correctness flip (p=0.0312)
+also had control above donor but is nominally significant only and does not
+survive the correction. The remaining outcome (concentration shift, low→high direction) was
 a flat 0/50 for both donor and control — worth a closer look in future
 work to confirm whether this reflects a real asymmetry (e.g. attention
 entropy has an asymmetric floor, easier to push up than down) or an
@@ -408,19 +425,23 @@ different architecture: rotary embeddings, parallel attention+MLP):
 
 ### 7.3 Interpretation
 
-**The structure confound is the real finding, and it replicates perfectly:
-10/10 layer-model combinations tested show `shuf!=donor` as YES** — a
-donor's own values, merely reordered across dimensions, become about as
-disruptive as pure random noise, on both GPT-2 and Pythia. This points to
-a specific, narrower, and more citable mechanism than the original
-"on-manifold" framing: the gentleness of a real activation comes from
-**which value sits in which dimension**, not from its overall scale or
-distribution of values. This is consistent with — and extends — the
-interpretability literature on a small number of disproportionately
-large-magnitude ("outlier" or "rogue") dimensions in transformer hidden
-states, which prior work has studied mainly for its effect on
-representational-similarity metrics; here the same structure appears to
-be load-bearing for how gently a representation can be perturbed.
+**The structure result is the main finding, and it replicates:
+10/10 layer-model combinations tested show `shuf!=donor` as YES** (Wilcoxon,
+Bonferroni-corrected) — a donor's own values, merely reordered across
+dimensions, become about as disruptive as pure random noise, on both GPT-2 and
+Pythia. So the gentleness of a real activation depends on **which value sits
+in which dimension**, not on its overall scale or value distribution.
+
+**What this does not yet show is why.** A natural hypothesis is that a small
+number of disproportionately large-magnitude ("outlier" or "rogue")
+dimensions, which are known to exist in GPT-2-family hidden states, carry the
+structure that matters. That is untested here. Shuffling shows that structure
+matters; it does not show which dimensions carry it. A direct test would
+shuffle only the top-k largest-magnitude dimensions, or only the remaining
+ones, and see which restores the disruption. Note also that the noise and
+shuffled controls are scaled to the donor's overall standard deviation, which
+is probably dominated by those few large dimensions, so "shuffled is about as
+disruptive as noise" is partly an expected consequence of that scaling.
 
 **The topic/format confound mostly did not hold up.** `topic matters?` is
 YES only once (GPT-2 small, layer 0 — and even there in the *reverse*
@@ -430,15 +451,15 @@ question are statistically indistinguishable. Topical relevance to the
 recipient's question is not doing meaningful work here — matching format
 and position is what matters, not matching content.
 
-**A secondary, unplanned pattern worth naming directly: the simple graded
-ordering (donor < unrelated < noise) breaks down specifically at each
-model's LAST layer** — GPT-2 small's layer 11, GPT-2-medium's layer 23,
-Pythia-70m's layer 5 — where shuffled/noise disruption jumps far above
-the trend from earlier layers (most sharply for Pythia: ~9.3 at the last
-layer vs. ~2 at every earlier layer tested). A plausible explanation: the
-final layer feeds almost directly into the output projection, so *any*
-patch there, regardless of content, gets amplified. This held on all
-three models tested, which is itself a small but consistent finding.
+**A secondary pattern: shuffled/noise disruption jumps at each model's last
+layer.** GPT-2 small layer 11 (about 5.1), GPT-2-medium layer 23 (about 6.1) and
+Pythia-70m layer 5 (about 9.3) all sit well above their earlier-layer values
+(about 2-3.5; about 2 for Pythia). This holds on all three models. The simple
+graded ordering (donor < unrelated < noise) is *not* tied to the last layer,
+though: it still held at GPT-2 small layer 11, failed at GPT-2-medium layer
+23, and failed at Pythia-70m layers 4 and 5. A plausible explanation for the
+last-layer jump is that the final layer feeds almost directly into the output
+projection, so any patch there gets amplified; this was not tested.
 
 ### 7.4 What this does and doesn't establish
 
@@ -450,6 +471,12 @@ three models tested, which is itself a small but consistent finding.
   scope gap, not a contradicting result.
 - Only single-position patching was tested here; range-patching (used
   elsewhere in this project) was not re-run for this specific test.
+- A real donor at the single "A:" position is a near no-op: mean disruption
+  is only about 0.04-0.15 at early GPT-2 small layers, and a same-template
+  off-topic question is equally gentle. That is what you would expect if the
+  hidden state at this position is mostly set by token identity and position.
+  This also bears on how much weight Baseline 1's single-position null can
+  carry (see the Section 5 caveat).
 - This explains *why* the control-beats-donor pattern from Section 6.4
   occurred. It does not change Baseline 1 or Baseline 2's own
   correctness-flip causal-null results, which stand as reported.
@@ -460,8 +487,12 @@ three models tested, which is itself a small but consistent finding.
 
 - **Single benchmark** (TruthfulQA mc1) — no cross-benchmark check yet
   (TriviaQA planned as a second benchmark per the original project plan).
-- **Single model** (GPT-2 small) — no scaling check to Pythia or larger
-  GPT-2 variants yet.
+- **Single model for the baselines** (GPT-2 small) — Baselines 1 and 2 have not
+  been run on Pythia or larger GPT-2 variants. (The dimension-structure test
+  does include Pythia-70m, and GPT-2-medium on the topic axis.)
+- **Power.** With 50 pairs per direction, 0 donor flips only rules out a true
+  flip rate above roughly 6%; Phase P1's 0/10 only rules out above roughly
+  30%. These are "no effect detected" results.
 - **Two baseline methods completed, both null — but not equally strong
   evidence.** Baseline 1 started from a clearly real signal (AUC 0.83)
   and still failed the causal test — a strong, informative null. Baseline
@@ -483,7 +514,8 @@ three models tested, which is itself a small but consistent finding.
   untested (see main README, Limitations).
 - **The dimension-structure finding (Section 7) used 2 architectures and
   10 layer-model combinations** — solid, but a third architecture and
-  range-patch mode would strengthen it further. GPT-2-medium specifically
+  range-patch mode would strengthen it further, and the outlier-dimension
+  explanation is an untested hypothesis. GPT-2-medium specifically
   was not tested on the structure axis (added after that run).
 - **Donor/recipient pairing is unpaired by content** — pairs are random
   question pairs, not matched for topic or structure, unlike P1's
@@ -495,16 +527,19 @@ three models tested, which is itself a small but consistent finding.
 
 ## 9. Next steps
 
-1. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
+1. **Outlier-dimension test:** shuffle or preserve only the top-k
+   largest-magnitude dimensions versus the rest, to find out which dimensions
+   carry the structure Section 7 found. If it holds, a dose-response version
+   (interpolate from donor to noise).
+2. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
    result is specific to TruthfulQA's adversarial design or generalizes.
-2. Model scaling check (Pythia or GPT-2-medium) for Baseline 1.
-3. Optionally extend Baseline 1's causal test to additional layers, in
-   case a non-AUC-maximizing layer turns out to be causally load-bearing
-   where layer 3 wasn't.
-4. (Lower priority) A third architecture or GPT-2-medium re-run on the
-   structure axis, and range-patch mode, for the dimension-structure
-   finding — 10/10 confirmed combinations is already strong evidence, so
-   this is optional polish, not required.
-5. Write up the full result (two baselines, both null; the on-manifold
-   finding explaining why) as the stretch-goal preprint-style document
-   connecting C1 → P1 → this audit as one coherent research arc.
+3. Model scaling check (Pythia or GPT-2-medium) for Baselines 1 and 2.
+4. Larger pair counts (150-200) for the baseline causal tests, with
+   confidence intervals, to tighten the "no effect detected" bounds.
+5. Optionally extend Baseline 1's causal test to additional layers, in case a
+   non-AUC-maximizing layer is causally load-bearing where layer 3 wasn't.
+6. (Lower priority) Structure axis on GPT-2-medium, a third architecture, and
+   range-patch mode for the five-condition test.
+7. Write up the full result (two baselines with no causal effect detected; the
+   dimension-structure finding explaining the noise-versus-donor pattern) as a
+   short technical report connecting C1 → P1 → this audit.
