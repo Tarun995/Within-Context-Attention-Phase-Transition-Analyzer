@@ -50,14 +50,15 @@ the same template) and scale-vs-structure (isolated by testing the
 donor's own values in randomly shuffled dimension order). The refined
 result, replicated across two different model architectures (GPT-2 and
 Pythia-70m, 10 layer-model combinations total): a donor's gentleness comes
-specifically from its **dimension-value alignment**, not from topical
-relevance or general "realness." Scrambling which value sits in which
+specifically from its **dimension-value alignment**; no effect of topical
+relevance was detected. Scrambling which value sits in which
 dimension makes a real donor about as disruptive as pure noise, on every
 layer of both models tested. See Section 7.
 
-This is the second and third independent null result this project has
+These are the second and third null results this project has
 produced with this same causal-patching methodology — the first being
-`post_plateau_var` in Phase P1. Three structurally different signals, on
+`post_plateau_var` in Phase P1. They are separate signals but not independent
+replications: the two baselines share the model, benchmark, and patch position. Three structurally different signals, on
 two task families, all failing to demonstrate causal load-bearing status,
 is the emerging pattern this audit is built to test for.
 
@@ -67,9 +68,12 @@ is the emerging pattern this audit is built to test for.
 
 A literature check at the start of this phase found that
 internal-state signals predicting LLM correctness/confidence are an
-actively developed and even commercialized area — but every method found
-is validated correlationally. None test whether the signal is causally
-load-bearing in the model's computation. This project already built and
+actively developed and even commercialized area, and much of the work
+validates the signal only correlationally. A few works do intervene along
+probe-derived directions (for example Inference-Time Intervention, Li et al.
+2023, and Marks & Tegmark 2023), which differs from the donor-swap patching
+test used here. The question this audit asks is whether the signal is causally
+load-bearing in the model's computation under that test. This project already built and
 validated an activation-patching causal test in Phase P1; this phase
 extends that same test to a real, published class of confidence-probing
 method on a real benchmark, rather than a synthetic task.
@@ -111,11 +115,12 @@ TruthfulQA is designed to elicit confident-but-wrong answers; GPT-2 small
 scoring below chance-on-4-choices is consistent with the benchmark's
 purpose, not a bug).
 
-AUC peaks sharply at layer 3 (bracketed on both sides by layers 2 and 4)
-and declines steadily through the rest of the network — the model appears
-to resolve whether it "knows" a TruthfulQA-style answer relatively early,
-with later layers not adding separability for this particular signal.
-**Layer 3 was used for all causal testing below.**
+AUC is highest at layer 3, but layers 3, 4 and 6 (0.832, 0.815, 0.808) are not
+distinguishable at this sample size: the held-out set has n=246, so about 68
+positives if the 27.7% base rate holds in the split, giving an AUC standard
+error of roughly 0.03 (Hanley-McNeil approximation). Layers 1-2 are lower
+(0.711, 0.771) and later layers do not add separability.
+**Layer 3, the highest-AUC layer, was used for all causal testing below.**
 
 ### 3.2 Causal test design
 
@@ -130,9 +135,10 @@ every subsequent choice token in the same forward pass, giving the patch
 actual leverage over which answer the model ends up favoring.
 
 **Donor/recipient design**, extending patch.py's methodology:
-1. Score all 817 questions unpatched; split into a **confidently-correct
-   pool** (n=226) and **confidently-incorrect pool** (n=591), ranked by
-   loglik margin between the top and second-place choice.
+1. Score all 817 questions unpatched; split by whether the model's top-scored
+   choice was correct into a **correct pool** (n=226) and an **incorrect pool**
+   (n=591). The two pools together are the full 817, so no margin cutoff was
+   applied to pool membership.
 2. For each of 50 donor/recipient pairs per direction: capture the
    donor's prefix hidden state, patch it into the recipient's forward
    pass, re-score all the recipient's choices, and check whether the
@@ -153,10 +159,10 @@ actual leverage over which answer the model ends up favoring.
 
 Two directions were tested, mirroring P1's bidirectional check:
 - **incorrect→correct**: donor from the correct pool, recipient from the
-  incorrect pool — does injecting a "confidently correct" representation
-  fix a wrong answer?
-- **correct→incorrect**: the reverse — does injecting a "confidently
-  incorrect" representation break a right answer?
+  incorrect pool — does injecting the representation from a correctly
+  answered question fix a wrong answer?
+- **correct→incorrect**: the reverse — does injecting the representation from an
+  incorrectly answered question break a right answer?
 
 Two levels of intervention strength were run:
 - **Single-position**: patches only the final prefix token ("A:").
@@ -185,7 +191,7 @@ every position in the slice.
 | correct → incorrect | 0.00% (0/50) | 32.00% (16/50) | −16 | <0.0001 |
 
 Donor flip rate was **0% in both directions** — transplanting a real
-"confident" representation from a different question never changed the
+representation from a different question never changed the
 recipient's answer. Notably, the *control* (random noise) flipped
 correctness more often than the real donor vector did in
 both directions — the opposite of what a causal effect would predict. Only
@@ -220,27 +226,36 @@ itself evidence of causality either way.
 The layer-3 hidden state that predicts correctness with AUC 0.83 does
 **not** appear to be part of the mechanism that produces correctness, at
 either intervention strength tested. Donor-patching — replacing a
-recipient's representation with a real "confidently correct" or
-"confidently incorrect" one from a different question — does not shift
+recipient's representation with a real one from a correctly or
+incorrectly answered different question — does not shift
 outcomes any more reliably than patching with matched-scale random noise
 does.
 
-This is a genuine null result, not an inconclusive one: the test was run
-at two escalating strengths specifically to rule out "the intervention
-just wasn't strong enough" as an explanation, and the pattern (donor ≈
-control, in both directions, at both strengths) held throughout.
+This is a null result at the strengths tested: the test was run at two
+escalating strengths to address "the intervention just wasn't strong enough",
+and the pattern (donor ≈ control, in both directions, at both strengths) held
+throughout. At single-position strength the intervention was close to a no-op
+(see the caveat below), so most of the weight rests on the range-patch
+comparison, which has n=50 pairs per direction.
 
 **Caveat added after the Section 7 results.** The single-position test is the
 weaker of the two. Section 7 shows that a real donor injected at that one
 position barely moves the model's choice scores (mean L2 disruption about
 0.1 at GPT-2 small layer 3), and a same-template off-topic question is just as
 gentle. So a 0/50 donor flip rate there is partly what a near no-op patch
-would produce, and it only rules out a true flip rate above roughly 6% (95%
-upper bound, rule of three). The range-patch result, where donor and control
+would produce, and it only rules out a true flip rate above roughly 6-7% (95%
+upper bound: 6% by the rule of three, 7% by the exact two-sided interval). The range-patch result, where donor and control
 flip rates are both large and indistinguishable, carries most of the weight.
 "No effect detected" is the accurate description, not "no effect".
 
-Combined with Phase P1's independent null result for `post_plateau_var`
+A separate open check: the probe reads the hidden state at the end of the chosen
+answer, whereas the patch is applied at the "A:" boundary before any answer
+exists. It has not yet been verified that the "A:" state carries the probe's
+signal. If a probe trained at that position scores near chance, the donor swap
+never moved what the probe reads, and the null would say much less than stated
+above. If its AUC is well above 0.5, the donors do carry the signal.
+
+Combined with Phase P1's separate null result for `post_plateau_var`
 (different signal, different task family, same last-layer patching
 methodology), this project has now found the same qualitative result
 twice: a signal that predicts model behavior without demonstrably causing
@@ -328,7 +343,10 @@ HIGH→LOW direction (p=0.0078) and the correctness flip in the LOW→HIGH
 direction (p=0.0001). In both, **control exceeded donor**, the opposite of
 what a causal effect would predict. The HIGH→LOW correctness flip (p=0.0312)
 also had control above donor but is nominally significant only and does not
-survive the correction. The remaining outcome (concentration shift, low→high direction) was
+survive the correction. The correction was applied over 2 directions, but 4
+outcomes were measured; at the stricter 0.0125 threshold (4 outcomes) the same
+two outcomes (p=0.0078 and p=0.0001) still pass, so the conclusions do not
+change. The remaining outcome (concentration shift, low→high direction) was
 a flat 0/50 for both donor and control — worth a closer look in future
 work to confirm whether this reflects a real asymmetry (e.g. attention
 entropy has an asymmetric floor, easier to push up than down) or an
@@ -447,9 +465,11 @@ disruptive as noise" is partly an expected consequence of that scaling.
 YES only once (GPT-2 small, layer 0 — and even there in the *reverse*
 direction: the off-topic question was LESS disruptive than the real
 donor). Everywhere else, a real donor and a same-template off-topic
-question are statistically indistinguishable. Topical relevance to the
-recipient's question is not doing meaningful work here — matching format
-and position is what matters, not matching content.
+question are statistically indistinguishable. No effect of topical relevance
+to the recipient's question was detected. Donor disruption sits near a floor
+(about 0.1 at early GPT-2 small layers), so non-significant differences there
+are not evidence of equivalence. Matching format and position is the likeliest
+explanation, but "no difference detected" is what was measured.
 
 **A secondary pattern: shuffled/noise disruption jumps at each model's last
 layer.** GPT-2 small layer 11 (about 5.1), GPT-2-medium layer 23 (about 6.1) and
@@ -477,22 +497,35 @@ projection, so any patch there gets amplified; this was not tested.
   hidden state at this position is mostly set by token identity and position.
   This also bears on how much weight Baseline 1's single-position null can
   carry (see the Section 5 caveat).
-- This explains *why* the control-beats-donor pattern from Section 6.4
-  occurred. It does not change Baseline 1 or Baseline 2's own
-  correctness-flip causal-null results, which stand as reported.
+- This offers a plausible account of the control-beats-donor pattern from
+  Section 6.4, not a demonstrated mechanism. It does not change Baseline 1 or
+  Baseline 2's own correctness-flip causal-null results, which stand as
+  reported, with the Section 5 power caveat.
 
 ---
 
 ## 8. Limitations
 
 - **Single benchmark** (TruthfulQA mc1) — no cross-benchmark check yet
-  (TriviaQA planned as a second benchmark per the original project plan).
+  (TriviaQA planned as a second benchmark).
 - **Single model for the baselines** (GPT-2 small) — Baselines 1 and 2 have not
   been run on Pythia or larger GPT-2 variants. (The dimension-structure test
   does include Pythia-70m, and GPT-2-medium on the topic axis.)
 - **Power.** With 50 pairs per direction, 0 donor flips only rules out a true
-  flip rate above roughly 6%; Phase P1's 0/10 only rules out above roughly
+  flip rate above roughly 6-7%; Phase P1's 0/10 only rules out above roughly
   30%. These are "no effect detected" results.
+- **Construct validity of the patch position (open).** The probe reads the
+  hidden state at the end of the chosen answer; the causal test patches the
+  "A:" boundary before any answer exists. It has not been verified that the
+  "A:" state carries the probe's signal. A probe trained at that position
+  settles it: AUC well above 0.5 means the donors carry the signal; near 0.5
+  means the donor swap never moved what the probe reads.
+- **The probe may partly decode surface features of the chosen answer (open).**
+  TruthfulQA's correct answers are often short or "I have no comment"-style. A
+  length/keyword-only baseline would settle this. Also to confirm: answer-choice
+  order is shuffled in `data.py`, since mc1 lists the correct choice first.
+- **Layer choice rests on a within-noise difference.** Layers 3, 4 and 6 are not
+  distinguishable on the held-out set (Section 3.1).
 - **Two baseline methods completed, both null — but not equally strong
   evidence.** Baseline 1 started from a clearly real signal (AUC 0.83)
   and still failed the causal test — a strong, informative null. Baseline
@@ -527,19 +560,22 @@ projection, so any patch there gets amplified; this was not tested.
 
 ## 9. Next steps
 
-1. **Outlier-dimension test:** shuffle or preserve only the top-k
+1. **Open validity checks, before building further:** train the probe at the
+   "A:" prefix position; add a length/keyword-only baseline; confirm
+   answer-choice order is shuffled in `data.py`.
+2. **Outlier-dimension test:** shuffle or preserve only the top-k
    largest-magnitude dimensions versus the rest, to find out which dimensions
    carry the structure Section 7 found. If it holds, a dose-response version
    (interpolate from donor to noise).
-2. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
+3. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
    result is specific to TruthfulQA's adversarial design or generalizes.
-3. Model scaling check (Pythia or GPT-2-medium) for Baselines 1 and 2.
-4. Larger pair counts (150-200) for the baseline causal tests, with
+4. Model scaling check (Pythia or GPT-2-medium) for Baselines 1 and 2.
+5. Larger pair counts (150-200) for the baseline causal tests, with
    confidence intervals, to tighten the "no effect detected" bounds.
-5. Optionally extend Baseline 1's causal test to additional layers, in case a
+6. Optionally extend Baseline 1's causal test to additional layers, in case a
    non-AUC-maximizing layer is causally load-bearing where layer 3 wasn't.
-6. (Lower priority) Structure axis on GPT-2-medium, a third architecture, and
+7. (Lower priority) Structure axis on GPT-2-medium, a third architecture, and
    range-patch mode for the five-condition test.
-7. Write up the full result (two baselines with no causal effect detected; the
+8. Write up the full result (two baselines with no causal effect detected; the
    dimension-structure finding explaining the noise-versus-donor pattern) as a
    short technical report connecting C1 → P1 → this audit.

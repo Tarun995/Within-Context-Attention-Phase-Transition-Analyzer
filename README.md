@@ -19,15 +19,15 @@ causally tests the resulting correlation via activation patching.
 The throughline across every phase of this project is one question: **when an internal
 signal inside a language model correlates with whether it gets something right, is that
 signal actually part of *why* it got it right — or just a symptom that happens to track the
-outcome?** Almost all interpretability and LLM-confidence work stops at the correlation.
-This project is built specifically to not stop there.
+outcome?** Much work on predicting LLM correctness from internal signals validates the
+signal only correlationally. This project is built specifically to test it causally.
 
 | Phase | Question asked | Method | Result |
 |---|---|---|---|
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
-| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No** — same null pattern on 2 independent methods, on a real benchmark |
-| **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure, not topic** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
+| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark |
+| **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure matters; no topic effect detected** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
 Three structurally different signals (a synthetic-task attention metric, a hidden-state probe,
 and an attention-concentration score), on two different task families, each predicting
@@ -73,7 +73,8 @@ pairs showed any shift**, in either direction. The patch mechanism itself was in
 verified to actually intervene in the forward pass before either result was trusted.
 
 **Honest reading:** at GPT-2 small's last layer, task correctness is robust to this
-component being heavily altered. That's real evidence `post_plateau_var` is a correlate of
+component being heavily altered. With 0/10 shifts, a true shift rate is only ruled out above
+roughly 30%, so this is suggestive evidence that `post_plateau_var` is a correlate of
 solving rather than a cause of it, at least at this layer and via this component — not
 evidence the model's attention dynamics are causally *irrelevant* everywhere. Earlier
 layers, other components, and full-generation effects remain untested. Full method and
@@ -88,18 +89,22 @@ above in full. The same story is laid out interactively in the **Notebook** tab 
 ## Is a published confidence-probing method causally valid? (Causal Audit phase)
 
 A literature check found that internal-state signals predicting LLM correctness/confidence
-are an actively developed and even commercialized area of applied research — but every
-method found is validated *correlationally*. None test whether the signal is causally
-load-bearing in the model's computation, which is exactly the question P1 already asked and
-answered for `post_plateau_var`. This phase extends that same activation-patching test to a
+are an actively developed and even commercialized area of applied research, and that much of
+it validates the signal only *correlationally*. A few works do intervene along probe-derived
+directions (for example Inference-Time Intervention, Li et al. 2023, and Marks & Tegmark
+2023), which is a different test from the donor-swap patching used here. Whether the signal
+is causally load-bearing in the model's computation is exactly the question P1 already asked
+and answered for `post_plateau_var`. This phase extends that same activation-patching test to a
 real, published class of confidence-probing method, on a real benchmark, rather than a
 synthetic task.
 
 A hidden-state linear probe (Azaria & Mitchell, 2023 style) was reproduced on TruthfulQA mc1
 (817 questions, GPT-2 small): predicting whether the model's own top-scored answer is
-correct, from a residual-stream hidden state. A layer sweep found a clear peak at **layer 3
-(AUC 0.83)**, bracketed on both sides by lower-AUC neighboring layers — a working, validated
-baseline in line with published results for this class of method.
+correct, from a residual-stream hidden state. A layer sweep found the highest AUC at
+**layer 3 (0.83)**, but layers 3, 4 and 6 (0.83, 0.82, 0.81) are not distinguishable at this
+sample size (held-out n=246, about 68 positives if the 27.7% base rate holds in the split,
+so the AUC standard error is roughly 0.03); layers 1-2 are lower (0.71, 0.77). A working
+baseline, in line with published results for this class of method.
 
 ![Linear probe AUC by layer](plots/causal_audit_layer_sweep.png)
 
@@ -118,10 +123,13 @@ direction (6/50 vs 0/50, p = 0.031) is nominal only against the Bonferroni thres
 appear to be part of the mechanism that produces correctness, at either intervention
 strength tested. The single-position test is the weaker of the two: a real donor at that one
 position barely moves the model's scores at all (see Section 7 of the findings doc), so 0/50
-donor flips there only rules out a true flip rate above roughly 6%. The range-patch result
-carries most of the weight. This is the second independent null result this project has produced with
+donor flips there only rules out a true flip rate above roughly 6-7%. The range-patch result
+carries most of the weight. This is the second separate null result this project has produced with
 this same causal-patching methodology — the first being `post_plateau_var` in Phase P1, a
-structurally different signal on a different task family. Full method, statistics, and
+structurally different signal on a different task family. One check is still open: the probe
+reads the state at the end of the chosen answer, while the patch is applied at the "A:"
+boundary before any answer exists, and it has not yet been verified that the "A:" state
+carries the probe's signal (see Limitations). Full method, statistics, and
 limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
 
 **Baseline 2 (attention-concentration score)** was reproduced next, and checked carefully
@@ -139,10 +147,10 @@ representation did** — the opposite of what a causal effect would predict.
 **That pattern was then investigated directly, with two confounds caught
 and controlled for before trusting the result:** format/token mismatch,
 and whether gentleness comes from scale or from dimension-specific
-structure. The refined finding, confirmed across GPT-2 and Pythia-70m (a
+structure. The refined finding, replicated across GPT-2 and Pythia-70m (a
 genuinely different architecture — rotary embeddings, parallel
-attention+MLP): a real donor's gentleness comes from **which value sits
-in which dimension**, not from topical relevance or realness in general.
+attention+MLP): a real donor's gentleness depends on **which value sits
+in which dimension**; no effect of topical relevance was detected.
 Scrambling a donor's own values across dimensions makes it about as
 disruptive as pure noise, on every layer of both models tested (10/10
 combinations). *Why* that is — for example, whether a few large-magnitude "outlier"
@@ -304,12 +312,20 @@ same block's output (only a later layer's can).
   with (AUC 0.54), so its causal null carries less evidential weight than Baseline 1's
   (which started from a clearly real AUC-0.83 signal). Null means "no effect detected", not
   "no effect": with 50 pairs per direction, 0 donor flips only rules out a true flip rate above
-  roughly 6%. See
+  roughly 6-7%. Three validity checks are still open: (1) whether the "A:" prefix-boundary
+  state, where the patch is applied, carries the probe's signal (the probe itself reads the
+  end-of-answer state); (2) whether the probe partly decodes surface features of the chosen
+  answer (length, "I have no comment"-style phrasing), which a length/keyword-only baseline
+  would settle; (3) that answer-choice order is shuffled in `data.py`, since mc1 lists the
+  correct choice first. See
   `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full list of what these results do
   and don't establish.
 
 ## Roadmap
 
+- **Open validity checks (first)** — train the probe at the "A:" prefix position to confirm the
+  patched state carries the signal; a length/keyword-only baseline for the probe; confirm
+  answer-choice order is shuffled.
 - **Second benchmark (TriviaQA)** — checks whether the null results are specific to
   TruthfulQA's adversarial framing or generalize to a more conventional QA benchmark.
 - **Broader layer coverage for the causal test** — only the AUC-sweep peak layer has been
@@ -332,6 +348,11 @@ same block's output (only a later layer's can).
 - Todd et al. (2024) — "Function Vectors in Large Language Models" (ICLR 2024)
 - Azaria & Mitchell (2023) — "The Internal State of an LLM Knows When It's Lying" (hidden-state
   linear probe reproduced and causally tested in the Causal Audit phase)
+- Li et al. (2023) — "Inference-Time Intervention: Eliciting Truthful Answers from a Language
+  Model" (NeurIPS 2023; intervenes along probe-derived directions, a different test from
+  donor-swap patching)
+- Marks & Tegmark (2023) — "The Geometry of Truth: Emergent Linear Structure in Large Language
+  Model Representations of True/False Datasets" (intervenes along truth directions)
 
 ## License
 
