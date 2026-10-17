@@ -10,9 +10,10 @@
 ## 1. Summary
 
 A hidden-state linear probe reproducing the Azaria & Mitchell (2023) style
-of correctness prediction achieves **AUC 0.83** at layer 3 of GPT-2 small
-on TruthfulQA mc1 — a working, validated baseline, in line with published
-results for this class of method.
+of correctness prediction achieves **AUC about 0.78** at layer 3 of GPT-2 small
+on TruthfulQA mc1 (mean over 20 random 70/30 splits, SD 0.03; the original
+single split gave 0.83, and layers 3-9 are all about 0.77-0.78) — a working
+baseline, in line with published results for this class of method.
 
 An attention-concentration score (Baseline 2), aggregated across all 12
 layers and all attention heads, achieves only **AUC 0.54** — barely above
@@ -28,10 +29,12 @@ representation behind the concentration score, at the layer with the
 best available signal). **All three returned a null result on the
 question they were designed to test** — donor-patched effects were
 statistically indistinguishable from (or weaker than) a random-vector
-control, in every condition. Baseline 1's null is the stronger, more
-informative result, since it started from a clearly real signal (AUC
-0.83); Baseline 2's null is real but carries less evidential weight,
-since there wasn't much of a correlational signal to begin with.
+control, in every condition. Baseline 1's probe signal is real (AUC about 0.78 at the end of the
+answer), but the state it patches, the "A:" boundary, carries only a weak
+part of it (AUC about 0.59; Section 3.3), so its null is informative about
+that question-side state, not about the whole signal. Baseline 2's null is
+real but carries less evidential weight, since there wasn't much of a
+correlational signal to begin with.
 
 A consistent, unplanned pattern showed up across every causal test run so
 far, worth noting on its own: **wherever a statistically significant
@@ -100,27 +103,33 @@ For each of 817 TruthfulQA mc1 questions:
 
 **Layer sweep** (GPT-2 small has 12 blocks, indices 0–11):
 
-| Layer | AUC |
-|---|---|
-| 1 | 0.711 |
-| 2 | 0.771 |
-| **3** | **0.832** |
-| 4 | 0.815 |
-| 6 | 0.808 |
-| 9 | 0.783 |
-| −1 (last) | 0.781 |
+| Layer | AUC, original single split | AUC, mean ± SD over 20 random 70/30 splits |
+|---|---|---|
+| 1 | 0.711 | 0.706 ± 0.029 |
+| 2 | 0.771 | 0.746 ± 0.031 |
+| 3 | 0.832 | 0.778 ± 0.030 |
+| 4 | 0.815 | 0.780 ± 0.031 |
+| 6 | 0.808 | 0.784 ± 0.032 |
+| 9 | 0.783 | 0.770 ± 0.023 |
+| −1 (last, block 11) | 0.781 | 0.749 ± 0.030 |
+
+Both columns use the original probe (unscaled logistic regression); the single
+split is `random_state=42`. Standardizing the features lowers the layer-3 mean
+slightly (0.764).
 
 Model's own base-rate accuracy on this question set: **27.7%** (expected —
 TruthfulQA is designed to elicit confident-but-wrong answers; GPT-2 small
 scoring below chance-on-4-choices is consistent with the benchmark's
 purpose, not a bug).
 
-AUC is highest at layer 3, but layers 3, 4 and 6 (0.832, 0.815, 0.808) are not
-distinguishable at this sample size: the held-out set has n=246, so about 68
-positives if the 27.7% base rate holds in the split, giving an AUC standard
-error of roughly 0.03 (Hanley-McNeil approximation). Layers 1-2 are lower
-(0.711, 0.771) and later layers do not add separability.
-**Layer 3, the highest-AUC layer, was used for all causal testing below.**
+Under repeated splits, layers 3-9 are all about 0.77-0.78 and layers 1-2 are lower.
+The apparent peak at layer 3 in the single split (0.832) was a favorable draw:
+the 20-split mean is 0.778 ± 0.030, and the best of 20 random splits reached
+0.840. (Held-out n=246 holds only about 68 positives if the 27.7% base rate
+holds, so a single split has an AUC standard error of roughly 0.03.)
+**Layer 3 was used for all causal testing below.** It was picked from the
+single-split sweep; since layers 3-9 are indistinguishable, the choice is
+arbitrary within that range, not optimal.
 
 ### 3.2 Causal test design
 
@@ -179,6 +188,45 @@ patching does not retroactively affect positions before the patch point
 (causal masking sanity check), and (c) range-patching correctly touches
 every position in the slice.
 
+### 3.3 Probe-position check: does the patched state carry the signal?
+
+The probe reads the state at the end of the chosen answer, but the causal test
+patches the "A:" boundary before any answer exists. To check whether the
+patched state carries the signal, the same kind of probe was trained at both
+positions (`src/attn_phase/audit/probe_position.py`: standardized logistic
+regression, 20 random stratified 70/30 splits). The verdict thresholds were
+fixed before running: boundary AUC >= 0.65 "carries", 0.55-0.65 "partial",
+< 0.55 "not detected".
+
+**Reproduction check.** Model base accuracy came out at 27.7%, matching the
+original pipeline, and the original unscaled single-split probe applied to the
+cached features reproduces 0.832 (layer 3) and 0.808 (layer 6).
+
+| Layer | end of answer | "A:" boundary |
+|---|---|---|
+| 1 | 0.684 ± 0.029 | 0.575 ± 0.040 |
+| 2 | 0.736 ± 0.031 | 0.579 ± 0.037 |
+| 3 | 0.764 ± 0.031 | 0.588 ± 0.032 |
+| 4 | 0.776 ± 0.032 | 0.582 ± 0.038 |
+| 6 | 0.782 ± 0.034 | 0.580 ± 0.027 |
+| 9 | 0.774 ± 0.024 | 0.596 ± 0.033 |
+| −1 (last, block 11) | 0.757 ± 0.029 | 0.581 ± 0.034 |
+
+A permutation test at layer 3 (200 fresh label permutations, 5 splits each)
+gave: boundary 0.585 against a null of 0.498 ± 0.030 (one-sided p = 0.010);
+end of answer 0.769 (p = 0.005, the smallest p possible with 200 permutations).
+A probe on surface features alone (answer length, "no comment" phrasing) scores
+0.583 ± 0.034, so the end-of-answer probe is not explained by those features.
+The chosen answer is an argmax over independently scored choices, so choice
+order cannot change it (unit-tested); `data.py` itself was not inspected.
+
+**Verdict: PARTIAL.** The "A:" state, which the single-position patch replaces,
+carries a real but weak part of the signal (AUC about 0.59, flat across layers),
+while the signal is clearly present at the end of the answer (about 0.76-0.78).
+The probe's signal is largely absent from the patched state. How much signal
+the other prefix positions carry, which the range patch also replaces, was not
+measured.
+
 ---
 
 ## 4. Results
@@ -223,13 +271,14 @@ itself evidence of causality either way.
 
 ## 5. Interpretation
 
-The layer-3 hidden state that predicts correctness with AUC 0.83 does
-**not** appear to be part of the mechanism that produces correctness, at
-either intervention strength tested. Donor-patching — replacing a
-recipient's representation with a real one from a correctly or
-incorrectly answered different question — does not shift
-outcomes any more reliably than patching with matched-scale random noise
-does.
+Donor-patching at layer 3 — replacing a recipient's representation with a
+real one from a correctly or incorrectly answered different question — did not
+shift outcomes any more reliably than patching with matched-scale random noise,
+at either intervention strength tested. What that says about the probe's signal
+depends on Section 3.3: the patched "A:" state carries only a weak part of it
+(AUC about 0.59, against about 0.78 for the probe at the end of the answer), so
+this is evidence about that question-side state, not a test of the signal as a
+whole.
 
 This is a null result at the strengths tested: the test was run at two
 escalating strengths to address "the intervention just wasn't strong enough",
@@ -248,12 +297,10 @@ upper bound: 6% by the rule of three, 7% by the exact two-sided interval). The r
 flip rates are both large and indistinguishable, carries most of the weight.
 "No effect detected" is the accurate description, not "no effect".
 
-A separate open check: the probe reads the hidden state at the end of the chosen
-answer, whereas the patch is applied at the "A:" boundary before any answer
-exists. It has not yet been verified that the "A:" state carries the probe's
-signal. If a probe trained at that position scores near chance, the donor swap
-never moved what the probe reads, and the null would say much less than stated
-above. If its AUC is well above 0.5, the donors do carry the signal.
+**The patch-position check has been run (Section 3.3).** The "A:" state carries
+a weak but real part of the probe's signal (AUC about 0.59, permutation
+p = 0.010; end of answer about 0.77). The null therefore speaks to that part
+only, which is another reason for the "no effect detected" wording above.
 
 Combined with Phase P1's separate null result for `post_plateau_var`
 (different signal, different task family, same last-layer patching
@@ -309,7 +356,7 @@ Aggregating across all layers and heads (matching the original method
 description in full, not just heads at one layer) did **not** meaningfully
 improve on the best single-layer result — ruling out "under-built
 reproduction" as the explanation for the weak signal. AUC 0.54–0.55
-across every configuration tested, versus Baseline 1's 0.83, is a real,
+across every configuration tested, versus Baseline 1's about 0.78, is a real,
 checked finding: this particular formulation of attention concentration
 carries little correctness signal on TruthfulQA for GPT-2 small.
 
@@ -514,26 +561,27 @@ projection, so any patch there gets amplified; this was not tested.
 - **Power.** With 50 pairs per direction, 0 donor flips only rules out a true
   flip rate above roughly 6-7%; Phase P1's 0/10 only rules out above roughly
   30%. These are "no effect detected" results.
-- **Construct validity of the patch position (open).** The probe reads the
-  hidden state at the end of the chosen answer; the causal test patches the
-  "A:" boundary before any answer exists. It has not been verified that the
-  "A:" state carries the probe's signal. A probe trained at that position
-  settles it: AUC well above 0.5 means the donors carry the signal; near 0.5
-  means the donor swap never moved what the probe reads.
-- **The probe may partly decode surface features of the chosen answer (open).**
-  TruthfulQA's correct answers are often short or "I have no comment"-style. A
-  length/keyword-only baseline would settle this. Also to confirm: answer-choice
-  order is shuffled in `data.py`, since mc1 lists the correct choice first.
-- **Layer choice rests on a within-noise difference.** Layers 3, 4 and 6 are not
-  distinguishable on the held-out set (Section 3.1).
+- **Patch position carries only part of the signal (checked, Section 3.3).** The
+  probe reads the end-of-answer state (AUC about 0.78); the patched "A:" state
+  scores about 0.59 (permutation p = 0.010). The null is a statement about that
+  state. The other prefix positions replaced by the range patch were not probed.
+- **Surface features (checked, Section 3.3).** A length/"no comment" probe scores
+  0.58, far below the end-of-answer probe, so the probe is not explained by them.
+  `data.py` itself was not inspected; choice order cannot change the model's
+  argmax choice (unit-tested).
+- **Layer choice.** Layers 3-9 are statistically indistinguishable under repeated
+  splits (Section 3.1); layer 3 was picked from a single split. The boundary-state
+  AUC is flat across layers (0.575-0.596), so no other layer would have given a
+  stronger patched state.
 - **Two baseline methods completed, both null — but not equally strong
-  evidence.** Baseline 1 started from a clearly real signal (AUC 0.83)
-  and still failed the causal test — a strong, informative null. Baseline
-  2's correlational signal was weak to begin with (AUC 0.54), so its
-  causal null carries less weight: a weak signal failing a causal test is
-  a less surprising result than a strong one failing.
+  evidence.** Baseline 1's probe signal is real (AUC about 0.78 at the end of
+  the answer), but the patched state carries only about 0.59 of it, so its null
+  is informative about that state, not the whole signal. Baseline 2's
+  correlational signal was weak to begin with (AUC 0.54), so its causal null
+  carries less weight: a weak signal failing a causal test is a less surprising
+  result than a strong one failing.
 - **Patching is position/layer-specific.** Baseline 1 tested only layer
-  3 (the AUC-sweep peak); Baseline 2 tested only layer 1 (its own best
+  3 (picked from a single-split sweep; layers 3-9 are indistinguishable); Baseline 2 tested only layer 1 (its own best
   layer, itself barely better than chance). A signal could in principle
   be causally load-bearing at a different layer even if the
   AUC-maximizing layer isn't. Not tested here for either baseline.
@@ -560,9 +608,12 @@ projection, so any patch there gets amplified; this was not tested.
 
 ## 9. Next steps
 
-1. **Open validity checks, before building further:** train the probe at the
-   "A:" prefix position; add a length/keyword-only baseline; confirm
-   answer-choice order is shuffled in `data.py`.
+1. **Intervene where the signal lives.** The probe-position check (Section 3.3)
+   showed the patched "A:" state carries about 0.59 AUC of a signal that reads
+   about 0.78 at the end of the answer. Candidate tests: probe-direction steering
+   (add the probe's weight direction at layer 3 versus a random direction of
+   equal norm), and probing the other prefix positions that the range patch
+   replaces.
 2. **Outlier-dimension test:** shuffle or preserve only the top-k
    largest-magnitude dimensions versus the rest, to find out which dimensions
    carry the structure Section 7 found. If it holds, a dose-response version

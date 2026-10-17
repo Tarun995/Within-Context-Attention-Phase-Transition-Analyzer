@@ -26,7 +26,7 @@ signal only correlationally. This project is built specifically to test it causa
 |---|---|---|---|
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
-| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark |
+| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark; the patched state carries only a weak part of the probe signal (see below) |
 | **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure matters; no topic effect detected** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
 Three structurally different signals (a synthetic-task attention metric, a hidden-state probe,
@@ -100,10 +100,10 @@ synthetic task.
 
 A hidden-state linear probe (Azaria & Mitchell, 2023 style) was reproduced on TruthfulQA mc1
 (817 questions, GPT-2 small): predicting whether the model's own top-scored answer is
-correct, from a residual-stream hidden state. A layer sweep found the highest AUC at
-**layer 3 (0.83)**, but layers 3, 4 and 6 (0.83, 0.82, 0.81) are not distinguishable at this
-sample size (held-out n=246, about 68 positives if the 27.7% base rate holds in the split,
-so the AUC standard error is roughly 0.03); layers 1-2 are lower (0.71, 0.77). A working
+correct, from a residual-stream hidden state. Averaged over 20 random 70/30 splits, the AUC
+is about **0.78 at layer 3** (SD 0.03) and about 0.77-0.78 at layers 3-9; layers 1-2 are lower
+(0.71, 0.75). The original single split gave 0.83 at layer 3, which was a favorable draw (the
+best of 20 random splits was 0.84), so layer 3 is not a distinguishable peak. A working
 baseline, in line with published results for this class of method.
 
 ![Linear probe AUC by layer](plots/causal_audit_layer_sweep.png)
@@ -119,23 +119,26 @@ patching: the donor flipped 0/50 in both directions, and in one direction (corre
 the random control flipped significantly *more* (16/50 vs 0/50, p < 0.0001); the other
 direction (6/50 vs 0/50, p = 0.031) is nominal only against the Bonferroni threshold of 0.025.
 
-**Honest reading:** the layer-3 signal that predicts correctness with AUC 0.83 does not
-appear to be part of the mechanism that produces correctness, at either intervention
-strength tested. The single-position test is the weaker of the two: a real donor at that one
+**Honest reading:** donor swaps at layer 3 changed correctness no more often than random
+noise, at either intervention strength tested. But a probe-position check (below) showed that
+the patched state carries only a weak part of the probe's signal, so this is a null for that
+question-side state, not for the signal as a whole. The single-position test is the weaker of
+the two: a real donor at that one
 position barely moves the model's scores at all (see Section 7 of the findings doc), so 0/50
 donor flips there only rules out a true flip rate above roughly 6-7%. The range-patch result
 carries most of the weight. This is the second separate null result this project has produced with
 this same causal-patching methodology — the first being `post_plateau_var` in Phase P1, a
-structurally different signal on a different task family. One check is still open: the probe
-reads the state at the end of the chosen answer, while the patch is applied at the "A:"
-boundary before any answer exists, and it has not yet been verified that the "A:" state
-carries the probe's signal (see Limitations). Full method, statistics, and
+structurally different signal on a different task family. The probe-position check: the probe
+reads the state at the end of the chosen answer, but the patch is applied at the "A:"
+boundary before any answer exists. Trained at that boundary, the same probe reaches AUC
+about 0.59 (permutation p = 0.010), versus about 0.77 at the end of the answer, so the
+signal is largely absent from the patched state. Full method, statistics, and
 limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
 
 **Baseline 2 (attention-concentration score)** was reproduced next, and checked carefully
 before trusting it: aggregated across all 12 layers and all attention heads (not just one
 layer, matching the method's full published description), it achieves only **AUC 0.54** —
-barely above chance, versus Baseline 1's 0.83. The weak signal held even after ruling out
+barely above chance, versus Baseline 1's about 0.78. The weak signal held even after ruling out
 under-aggregation as the cause. A causal test was still run (patching the representation
 behind the concentration score, measuring both a correctness flip and a shift in the
 recipient's own concentration score) — also null, though this null carries less weight than
@@ -222,6 +225,8 @@ python run_causal_test_concentration.py --device cuda --layer 1 --n-questions 81
 python run_manifold_test.py --device cuda --layer 3 --n-questions 817 --n-pairs 50   # 5-condition test, one layer
 python run_manifold_sweep.py --model gpt2 --device cuda --n-pairs 100                  # 5-condition test, layer sweep
 python run_manifold_sweep.py --model EleutherAI/pythia-70m --device cuda --n-pairs 100
+python -m attn_phase.audit.probe_position --device cuda --cache probe_pos_gpt2.npz --perms 200   # probe at "A:" vs end of answer
+python probe_settings_check.py probe_pos_gpt2.npz 1 2 3 4 6 9 11   # single-split vs repeated-split probe AUC
 ```
 
 Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
@@ -255,12 +260,14 @@ attention-phase-analyzer/
             causal_test_concentration.py                   # Baseline 2's causal test
             causal_test_manifold.py                          # five-condition dimension-structure test
             model_adapter.py                                  # GPT-2 / GPT-NeoX block lookup, auto layer choice
+            probe_position.py                                  # probe at the "A:" boundary vs end of answer, permutation test
     verify_audit_pipeline.py        # Causal Audit: Baseline 1 probe + layer sweep
     run_causal_test.py               # Causal Audit: Baseline 1 causal test runner
     run_attention_score_probe_multilayer.py   # Causal Audit: Baseline 2 probe (multi-layer)
     run_causal_test_concentration.py           # Causal Audit: Baseline 2 causal test runner
     run_manifold_test.py                        # Causal Audit: five-condition test, single layer
     run_manifold_sweep.py                        # Causal Audit: five-condition test, layer sweep (any supported model)
+    probe_settings_check.py                       # Causal Audit: single-split vs repeated-split probe AUC
     tests/                        # about 100 tests: tasks, metrics, answer-matching, stats, patching,
                                   # plus the Causal Audit phase's own hook/probe/patch tests
     docs/FINDINGS.md                # full research narrative, incl. bugs found + P1 causal test
@@ -308,29 +315,28 @@ same block's output (only a later layer's can).
   what remains untested and why it wasn't pursued further within this phase.
 - **Causal Audit phase tested two baseline methods (hidden-state linear probe, attention-
   concentration score), one benchmark (TruthfulQA mc1), one model (GPT-2 small), and only
-  each method's own best-AUC layer.** Baseline 2's correlational signal was weak to begin
+  one layer per method (layer 3 and layer 1; Baseline 1's layer 3 is not a distinguishable AUC peak).** Baseline 2's correlational signal was weak to begin
   with (AUC 0.54), so its causal null carries less evidential weight than Baseline 1's
-  (which started from a clearly real AUC-0.83 signal). Null means "no effect detected", not
+  (whose probe signal is real, AUC about 0.78, though the patched state carries only about 0.59 of it). Null means "no effect detected", not
   "no effect": with 50 pairs per direction, 0 donor flips only rules out a true flip rate above
-  roughly 6-7%. Three validity checks are still open: (1) whether the "A:" prefix-boundary
-  state, where the patch is applied, carries the probe's signal (the probe itself reads the
-  end-of-answer state); (2) whether the probe partly decodes surface features of the chosen
-  answer (length, "I have no comment"-style phrasing), which a length/keyword-only baseline
-  would settle; (3) that answer-choice order is shuffled in `data.py`, since mc1 lists the
-  correct choice first. See
+  roughly 6-7%. Validity checks run since: the "A:" boundary state carries a weak but real part
+  of the probe's signal (AUC about 0.59, against about 0.78 at the end of the answer), and a
+  length/"no comment" probe scores only 0.58 (findings doc, Section 3.3). See
   `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full list of what these results do
   and don't establish.
 
 ## Roadmap
 
-- **Open validity checks (first)** — train the probe at the "A:" prefix position to confirm the
-  patched state carries the signal; a length/keyword-only baseline for the probe; confirm
-  answer-choice order is shuffled.
+- **Intervene where the signal lives** — the probe-position check found the patched "A:" state
+  carries AUC about 0.59 of a signal that reads about 0.78 at the end of the answer. Candidate
+  tests: probe-direction steering against a random direction of equal norm, and probing the
+  other prefix positions that the range patch replaces.
 - **Second benchmark (TriviaQA)** — checks whether the null results are specific to
   TruthfulQA's adversarial framing or generalize to a more conventional QA benchmark.
-- **Broader layer coverage for the causal test** — only the AUC-sweep peak layer has been
-  causally tested for each baseline so far; a signal could in principle be load-bearing at a
-  different layer even where the AUC-maximizing one isn't.
+- **Broader layer coverage for the causal test** — only one layer per baseline has been
+  causally tested so far (layer 3 for Baseline 1, not a distinguishable AUC peak; layer 1 for
+  Baseline 2). The boundary-state AUC is flat across layers, so the patch position matters more
+  than the layer.
 - **Outlier-dimension test** — the dimension-structure result shows *that* a donor's
   value-to-dimension placement matters, not *which* dimensions carry it. Shuffle or preserve
   only the largest-magnitude dimensions versus the rest to find out. Then extend the
