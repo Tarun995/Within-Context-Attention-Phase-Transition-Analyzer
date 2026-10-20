@@ -1,6 +1,6 @@
 # Causal Validity Audit of LLM Confidence-Probing Methods — Findings
 
-**Status:** Baseline 1, Baseline 2, and the dimension-structure sensitivity test (Section 7, confirmed on GPT-2 and Pythia-70m) all complete. The outlier-dimension explanation for Section 7 is an open hypothesis.
+**Status:** Baseline 1, Baseline 2, and the dimension-structure sensitivity test (Section 7, confirmed on GPT-2 and Pythia-70m) all complete. The outlier-dimension explanation for Section 7 is an open hypothesis. A probe-direction steering test (Section 3.4) is also complete: no special effect detected.
 **Model:** GPT-2 small (`gpt2`, 12 layers, HuggingFace `transformers`)
 **Benchmark:** TruthfulQA, multiple-choice (`mc1`), full validation split, n=817
 **Repo:** [Within-Context Attention Phase Transition Analyzer](https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer)
@@ -57,6 +57,13 @@ specifically from its **dimension-value alignment**; no effect of topical
 relevance was detected. Scrambling which value sits in which
 dimension makes a real donor about as disruptive as pure noise, on every
 layer of both models tested. See Section 7.
+
+A probe-direction steering test (Section 3.4) then pushed the layer-3 hidden state
+along the probe's own direction while the model scored each answer, against random
+directions of equal size and an answer-length direction. At a dose of about 20% of
+the hidden-state norm the probe's slope was about 2.5 null SDs above random but missed
+the pre-set threshold (p = 0.098 and 0.049 against 0.025), with no change in accuracy
+(27.5% vs 27.7%). Verdict: no special effect detected.
 
 These are the second and third null results this project has
 produced with this same causal-patching methodology — the first being
@@ -227,6 +234,93 @@ The probe's signal is largely absent from the patched state. How much signal
 the other prefix positions carry, which the range patch also replaces, was not
 measured.
 
+### 3.4 Probe-direction steering: is the probe's direction a lever?
+
+Patching replaces one state with another. Steering instead tests the probe's own
+direction (`src/attn_phase/audit/steer_probe.py`).
+
+**Method.**
+- **Direction.** The weights of a standardized logistic regression on the
+  end-of-answer state at layer 3, mapped back to raw activation space, unit
+  length. Positive means "predicts correct".
+- **Cross-fitting.** 5 folds; the direction used on a question was fit on the other
+  four folds.
+- **Intervention.** Add ±α·s·u to the layer-3 post-block state at the answer tokens
+  of every choice while it is scored, then recompute every choice's score (mean
+  per-token log-likelihood). s is the SD of the training states' projection on u
+  (about 0.34-0.41), so α is in SD along the probe direction. The mean hidden-state
+  norm is 59.0. The vector goes on the answer tokens because adding it only at the
+  last token cannot change any score (nothing scored comes after it; unit-tested).
+  The state at "A:" is not steered, so the first answer token's score is unchanged.
+- **Outcome.** Per question, margin = best correct choice score minus best incorrect
+  choice score. Slope = mean margin at +α minus mean margin at −α. Generic
+  disruption hits both signs about equally and cancels; a lever shows as a positive
+  slope (pushing toward "correct" raises the correct answer's margin). Also
+  reported: accuracy, and the share of questions whose top-scored choice changes.
+- **Controls.** Random directions of the same norm, redrawn in every fold:
+  isotropic, and drawn from the states' own covariance. Plus a surface direction (a
+  probe for "answer longer than the median"; a "no comment" direction was dropped
+  because too few top answers said it). The surface control was added because GPT-2
+  ties its input and output embeddings, so any direction that encodes the current
+  token's identity raises that token's score regardless of truth.
+- **Rule fixed before running.** Claim a lever only if p <= threshold against both
+  random families (p = (1 + number of null slopes with |slope| >= the probe's) /
+  (1 + number of random directions)) and the probe's |slope| exceeds the surface
+  directions'.
+
+**Order of runs.** The 2 SD run came first (20 random directions per family,
+threshold 0.05). Random directions changed only 0.4% of top answers, so that dose
+moves nothing. A dose check (one fold, 164 questions, 6 random directions per family)
+then picked the dose by a rule fixed in advance: the smallest dose at which random
+directions change at least 5% of top answers. The final run used that dose, 40
+random directions per family, and a stricter threshold of 0.025 because it was a
+second look at the same data.
+
+**Dose check** (one fold, so noisier than the final run):
+
+| Dose (SD) | Push (share of norm) | Random: top answer changes | Probe: top answer changes | Probe slope |
+|---|---|---|---|---|
+| 8 | 2.95 (5.0%) | 1.6% | 1.5% | +0.0074 |
+| 16 | 5.90 (10.0%) | 2.7% | 2.7% | +0.0151 |
+| 32 | 11.81 (20.0%) | 5.2% | 4.6% | +0.0314 |
+| 64 | 23.62 (40.0%) | 10.7% | 10.1% | +0.0666 |
+
+**Full-data results** (n = 817; unsteered accuracy 27.7%, mean margin -0.634):
+
+| Run | Push (share of norm) | Probe slope [95% CI over questions] | Random slope, mean (SD): iso / cov | p: iso / cov | Accuracy, +α / −α | Top answer changes: probe / iso / cov |
+|---|---|---|---|---|---|---|
+| 2 SD, 20 random per family | 0.75 (1.3%) | +0.0009 [+0.0004, +0.0015] | -0.0002 (0.0004) / -0.0001 (0.0004) | 0.095 / 0.048 | 27.5% / 27.7% | 0.4% / 0.4% / 0.5% |
+| 32 SD, 40 random per family | 12.0 (20.3%) | +0.0178 [+0.0095, +0.0266] | -0.0019 (0.0084) / -0.0022 (0.0077) | 0.098 / 0.049 | 27.5% / 27.7% | 5.2% / 4.9% / 5.5% |
+
+The surface (length) direction's slope was +0.0001 at 2 SD and -0.0008 at 32 SD.
+
+**Verdict: NO SPECIAL EFFECT at both doses.** The pre-set bar was not met (at 32 SD
+the threshold was 0.025, and the smallest possible p with 40 random directions is
+0.024).
+
+**Reading.**
+- The 2 SD run could not have detected anything: no direction, random or probe,
+  moved the model's choices at that dose.
+- At 32 SD the probe's slope is 2.4-2.6 null SDs above the random mean (4th of 41
+  among isotropic directions, 2nd of 41 among covariance-matched ones) but misses
+  the threshold. The absolute effect is small: 0.018 on a mean margin gap of -0.63
+  (about 3%), accuracy is unchanged, and the probe changes the top answer no more
+  often than random directions do.
+- The slope grows in a straight line with dose (about +0.001 per SD) and the random
+  directions' spread scales the same way, so the p-values do not improve with dose
+  (0.095 / 0.048 at 2 SD, 0.098 / 0.049 at 32 SD). Both runs use the same random
+  directions (same seed), so the 32 SD run is not an independent replication.
+- The confidence interval on the probe slope is over questions. It shows the slope
+  is not exactly zero; it does not compare the probe with random directions.
+- This does not show the signal is non-causal. It shows that no causal handle was
+  found along this direction, at this layer, in this setup.
+
+**Limits of this test.** One layer (3). The probe is fit at the last answer token but
+the vector is added at every answer token (a distribution shift). The "A:" state is
+not steered. One linear direction. GPT-2 small is near chance on this task (27.7%),
+so there may be little truth signal for any direction to carry. Two looks at the
+same data.
+
 ---
 
 ## 4. Results
@@ -302,6 +396,13 @@ a weak but real part of the probe's signal (AUC about 0.59, permutation
 p = 0.010; end of answer about 0.77). The null therefore speaks to that part
 only, which is another reason for the "no effect detected" wording above.
 
+**The steering test (Section 3.4) addresses the same gap from the other side.** It
+pushes along the probe's own direction instead of swapping a state, so it does not
+depend on the "A:" state carrying the signal. At about 20% of the hidden-state norm it
+still did not beat random directions at the pre-set threshold, and it did not change
+accuracy. Together with the patching nulls, no causal handle on the probe's signal was
+found. The positive slope at 32 SD (about 2.5 null SDs above random, about 3% of the
+margin gap) is a hint at most, and the two doses are not independent evidence.
 Combined with Phase P1's separate null result for `post_plateau_var`
 (different signal, different task family, same last-layer patching
 methodology), this project has now found the same qualitative result
@@ -569,6 +670,11 @@ projection, so any patch there gets amplified; this was not tested.
   0.58, far below the end-of-answer probe, so the probe is not explained by them.
   `data.py` itself was not inspected; choice order cannot change the model's
   argmax choice (unit-tested).
+- **Steering test (Section 3.4).** One layer, one model, one linear direction. The
+  vector is added at every answer token though the probe is fit at the last one, and
+  the "A:" state is not steered. GPT-2 small is near chance here, so there may be
+  little truth signal to find. The data was looked at twice, so the second look used a
+  stricter threshold (0.025); both doses use the same random directions.
 - **Layer choice.** Layers 3-9 are statistically indistinguishable under repeated
   splits (Section 3.1); layer 3 was picked from a single split. The boundary-state
   AUC is flat across layers (0.575-0.596), so no other layer would have given a
@@ -608,12 +714,10 @@ projection, so any patch there gets amplified; this was not tested.
 
 ## 9. Next steps
 
-1. **Intervene where the signal lives.** The probe-position check (Section 3.3)
-   showed the patched "A:" state carries about 0.59 AUC of a signal that reads
-   about 0.78 at the end of the answer. Candidate tests: probe-direction steering
-   (add the probe's weight direction at layer 3 versus a random direction of
-   equal norm), and probing the other prefix positions that the range patch
-   replaces.
+1. **Steering follow-ups.** Probe-direction steering at layer 3 found no special
+   effect (Section 3.4). Still open: other layers; steering the "A:" boundary as well
+   as the answer tokens; probing the other prefix positions that the range patch
+   replaces; repeating on a model that is clearly above chance on TruthfulQA.
 2. **Outlier-dimension test:** shuffle or preserve only the top-k
    largest-magnitude dimensions versus the rest, to find out which dimensions
    carry the structure Section 7 found. If it holds, a dose-response version

@@ -26,7 +26,7 @@ signal only correlationally. This project is built specifically to test it causa
 |---|---|---|---|
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
 | **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
-| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark; the patched state carries only a weak part of the probe signal (see below) |
+| **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark; the patched state carries only a weak part of the probe signal; steering along the probe's own direction did not beat random directions either (see below) |
 | **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure matters; no topic effect detected** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
 Three structurally different signals (a synthetic-task attention metric, a hidden-state probe,
@@ -135,6 +135,19 @@ about 0.59 (permutation p = 0.010), versus about 0.77 at the end of the answer, 
 signal is largely absent from the patched state. Full method, statistics, and
 limitations are in [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md).
 
+**Steering along the probe direction (a different test).** Because patching replaces only one
+weak state, a follow-up pushed the layer-3 hidden state along the probe's own direction while
+the model scored each answer, and compared the change in the correct-minus-wrong margin with
+random directions of the same size (isotropic and covariance-matched) and an answer-length
+direction, cross-fitted over 5 folds. At a small dose (2 SD, about 1% of the hidden-state norm)
+nothing moved for any direction. At a dose chosen from the random directions alone (32 SD,
+about 20% of the norm, the smallest dose where random directions change at least 5% of top
+answers), the probe's margin slope was +0.0178 against a random-direction mean of about -0.002
+(SD about 0.008). That is 2.4-2.6 SDs above random, but it misses the pre-set bar (p = 0.098
+and 0.049, threshold 0.025), and accuracy did not change (27.5% vs 27.7%). **Verdict: no special
+effect detected.** The 32 SD run reuses the same directions at a larger dose, so it is not an
+independent replication. Details and caveats: Section 3.4 of the findings doc.
+
 **Baseline 2 (attention-concentration score)** was reproduced next, and checked carefully
 before trusting it: aggregated across all 12 layers and all attention heads (not just one
 layer, matching the method's full published description), it achieves only **AUC 0.54** —
@@ -227,6 +240,10 @@ python run_manifold_sweep.py --model gpt2 --device cuda --n-pairs 100           
 python run_manifold_sweep.py --model EleutherAI/pythia-70m --device cuda --n-pairs 100
 python -m attn_phase.audit.probe_position --device cuda --cache probe_pos_gpt2.npz --perms 200   # probe at "A:" vs end of answer
 python probe_settings_check.py probe_pos_gpt2.npz 1 2 3 4 6 9 11   # single-split vs repeated-split probe AUC
+python -m attn_phase.audit.steer_probe --features probe_pos_gpt2.npz --device cuda --alphas 2 --random 20 --stop-after 2 --out steer.json   # probe-direction steering, small dose
+python -m attn_phase.audit.steer_probe --features probe_pos_gpt2.npz --device cuda --alphas 8 16 32 64 --random 6 --stop-after 1 --ckpt steer_ckpt_dose.npz --raw steer_raw_dose.npz --out steer_dose.json   # dose check
+python -m attn_phase.audit.steer_probe --features probe_pos_gpt2.npz --device cuda --alphas 32 --random 40 --p-thresh 0.025 --stop-after 1 --ckpt steer_ckpt_a32.npz --raw steer_raw_a32.npz --out steer_a32.json   # 32 SD run
+# steer_probe saves progress after every fold; run the same command again to resume until all 5 folds are done
 ```
 
 Downloads TruthfulQA mc1 and GPT-2 from the HuggingFace Hub on first run (cached locally
@@ -261,6 +278,7 @@ attention-phase-analyzer/
             causal_test_manifold.py                          # five-condition dimension-structure test
             model_adapter.py                                  # GPT-2 / GPT-NeoX block lookup, auto layer choice
             probe_position.py                                  # probe at the "A:" boundary vs end of answer, permutation test
+            steer_probe.py                                      # probe-direction steering vs random / surface directions, cross-fitted, resumable
     verify_audit_pipeline.py        # Causal Audit: Baseline 1 probe + layer sweep
     run_causal_test.py               # Causal Audit: Baseline 1 causal test runner
     run_attention_score_probe_multilayer.py   # Causal Audit: Baseline 2 probe (multi-layer)
@@ -324,13 +342,19 @@ same block's output (only a later layer's can).
   length/"no comment" probe scores only 0.58 (findings doc, Section 3.3). See
   `docs/CAUSAL_AUDIT_FINDINGS.md`, Limitations, for the full list of what these results do
   and don't establish.
+- **Steering test (probe direction):** one layer (3), one model, one linear direction. The
+  vector was added at every answer token although the probe was fit at the last one, and the
+  state at "A:" was not steered. GPT-2 small answers only 27.7% correctly, so there may be
+  little truth signal for any direction to carry. The data was looked at twice (2 SD, then 32
+  SD), so the second look used a stricter threshold (0.025). "No special effect detected" is
+  not "no effect".
 
 ## Roadmap
 
-- **Intervene where the signal lives** — the probe-position check found the patched "A:" state
-  carries AUC about 0.59 of a signal that reads about 0.78 at the end of the answer. Candidate
-  tests: probe-direction steering against a random direction of equal norm, and probing the
-  other prefix positions that the range patch replaces.
+- **Steering follow-ups** — probe-direction steering at layer 3 found no special effect
+  (findings doc, Section 3.4). Still open: other layers, steering the "A:" boundary as well as
+  the answer tokens, probing the other prefix positions that the range patch replaces, and
+  repeating on a model that is clearly above chance on TruthfulQA.
 - **Second benchmark (TriviaQA)** — checks whether the null results are specific to
   TruthfulQA's adversarial framing or generalize to a more conventional QA benchmark.
 - **Broader layer coverage for the causal test** — only one layer per baseline has been
