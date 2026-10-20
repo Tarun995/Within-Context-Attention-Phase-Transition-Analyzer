@@ -1,0 +1,49 @@
+{
+  "base_acc": 0.2766217870257038,
+  "base_margin": -0.6339518167397675,
+  "n": 817,
+  "p_thresh": 0.025,
+  "alphas": {
+    "32.0": {
+      "probe": {
+        "d_plus": 0.0050790271969145045,
+        "d_minus": -0.012732633616378579,
+        "slope": 0.017811660813293082,
+        "slope_ci95": [
+          0.00953326987665753,
+          0.0266067948598173
+        ],
+        "acc_plus": 0.27539779681762544,
+        "acc_minus": 0.2766217870257038,
+        "flip": 0.052019583843329255
+      },
+      "iso": {
+        "n": 40,
+        "slope_mean": -0.001898399859922169,
+        "slope_sd": 0.008389317089330358,
+        "d_plus_mean": -0.0036038007363768223,
+        "d_minus_mean": -0.0017054008764546534,
+        "acc_plus_mean": 0.2752141982864137,
+        "acc_minus_mean": 0.2752447980416156,
+        "flip_mean": 0.049464504283965725,
+        "p": 0.0975609756097561
+      },
+      "cov": {
+        "n": 40,
+        "slope_mean": -0.002169157611149177,
+        "slope_sd": 0.007742981409266487,
+        "d_plus_mean": -0.003133628479087659,
+        "d_minus_mean": -0.0009644708679384818,
+        "acc_plus_mean": 0.2748164014687883,
+        "acc_minus_mean": 0.2752447980416156,
+        "flip_mean": 0.05517135862913097,
+        "p": 0.04878048780487805
+      },
+      "surf": {
+        "surf_length": -0.0008349777945981907
+      },
+      "specific": true,
+      "verdict": "NO SPECIAL EFFECT: the probe direction moves the correct-vs-incorrect margin no more than random directions of equal size; the probe reads a signal the model does not use as a lever here"
+    }
+  }
+}
