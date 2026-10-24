@@ -4,13 +4,22 @@
 view of the headline finding, the full research notebook (including the bugs found along the
 way), and a panel for exploring your own `results.json` from a local run.
 
+**At a glance**
+
+- **Question:** when an internal signal predicts that a language model's answer is correct, is it part of why the answer is correct, or only a symptom of it?
+- **Origin:** an attention-dynamics metric separated solved from failed synthetic tasks (p=0.042, a modest correlate), and activation patching then detected no causal effect (Phases C1 and P1).
+- **Probe:** a linear probe on GPT-2 small's hidden states predicts whether its TruthfulQA answer is correct (AUC about 0.78, mean of 20 random splits).
+- **Causal tests:** donor-swap patching (single-position and range) and steering along the probe's own direction did not beat random-noise controls. Verdict: **no effect detected**. The patched state carries only part of the probe's signal (AUC about 0.59) and GPT-2 small is near chance on this benchmark (27.7%), so these are limited nulls, not proof of no effect.
+- **Side finding:** random noise disrupts the model more than a real donor activation, and this tracks which value sits in which dimension, not topic (10/10 layer-model combinations, GPT-2 and Pythia-70m).
+- **Not yet done:** a positive control (showing the method recovers a known mechanism) and a model clearly above chance on the benchmark.
+
 A statistical testing tool for a specific mechanistic-interpretability question: **does a
 frozen transformer's attention behave measurably differently, within a single forward pass,
 when it solves a task versus when it fails one — and if so, is that difference causal?**
 
 This isn't a visualization tool — it's a hypothesis-testing pipeline. It generates matched
 synthetic tasks, runs them through a HuggingFace causal LM, extracts attention-derived
-metrics per token position, runs a properly powered, multiple-comparisons-corrected
+metrics per token position, runs a multiple-comparisons-corrected
 statistical test comparing solved vs. failed task instances, and — as of Phase P1 —
 causally tests the resulting correlation via activation patching.
 
@@ -25,21 +34,22 @@ signal only correlationally. This project is built specifically to test it causa
 | Phase | Question asked | Method | Result |
 |---|---|---|---|
 | **C1** | Does an attention-derived metric correlate with task success? | Synthetic tasks, Bonferroni-corrected statistical test | Yes — `post_plateau_var` separates solved/failed (p=0.042, r=-0.549) |
-| **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No** — 0/10 shifts, both single-position and full-range patching |
+| **P1** | Is that correlate actually causal? | Activation patching, donor/recipient forward-pass splicing | **No effect detected** — 0/10 shifts, both single-position and full-range patching |
 | **Causal Audit** | Do *published* LLM confidence-probing methods fare any better? | Reproduce 2 real methods (hidden-state probe, attention-concentration score), causally test both | **No effect detected** — same null pattern on 2 separate methods (same model, benchmark, and patch position), on a real benchmark; the patched state carries only a weak part of the probe signal; steering along the probe's own direction did not beat random directions either (see below) |
 | **Dimension-Structure Test** | Does disruption track topical relevance, or something more specific? | 5-condition patch comparison, isolating format/topic from scale/structure, on 2 model architectures | **Structure matters; no topic effect detected** — a donor's own values in random dimension order are as disruptive as noise (10/10 layer-model combos, GPT-2 + Pythia) |
 
 Three structurally different signals (a synthetic-task attention metric, a hidden-state probe,
-and an attention-concentration score), on two different task families, each predicting
-behavior without demonstrably causing it — found with the same rigor each time: pre-register
+and an attention-concentration score, the last only weakly predictive), on two different task
+families, none showing a causal effect under these tests — each checked the same way: state
 what counts as a positive result before running it, verify the intervention mechanism itself
 before trusting any result from it, and report null findings as first-class, not as failures
 to hide. Along the way, a pattern showed up that wasn't hypothesized in advance — random-noise
 controls consistently disrupting the model more than real donor swaps — and rather than just
 noting it, a dedicated follow-up test traced it to a narrower explanation (dimension structure, not topic) (see
 "Is a published confidence-probing method causally valid?" below). **Where this is headed
-next:** an outlier-dimension test (which dimensions carry the structure?), a second
-benchmark (TriviaQA), and a model-scaling check. See "Roadmap" below.
+next:** a positive control (showing the method recovers a known mechanism), a model that is
+clearly above chance on the benchmark, and an outlier-dimension test (which dimensions
+carry the structure?). See "Roadmap" below.
 
 ## Headline result (GPT-2 small, Phase C1)
 
@@ -57,6 +67,10 @@ than failed tasks — the model doesn't settle into a quieter, more stable atten
 when it succeeds. It keeps attention more dynamic and oscillatory, a plausible signature of
 sustained pattern-matching rather than a static "locked-in" state. The other two tested
 metrics show no significant separation — reported honestly, not dropped.
+
+**Caveat:** the corrected p (0.042) is close to the 0.05 threshold, n is small (29 usable
+instances, one base seed), and the separation is partly at the instance level (see
+Limitations). Read it as a modest correlate, not an established effect.
 
 ![Main Finding](plots/hero_finding.png)
 
@@ -112,7 +126,7 @@ Two activation-patching causal tests, of increasing strength, were then run on t
 signal: single-position patching (only the final prompt-prefix token) and range patching
 (every prefix token, closing the bypass where the model could still read the untouched
 question directly). Both included a random-vector control and McNemar's test on the paired
-outcomes, not just a raw flip count. **Neither test showed a causal effect** — the donor never
+outcomes, not just a raw flip count. **Neither test detected a causal effect** — the donor never
 flipped correctness more often than the random-vector control, in any condition. Range
 patching: donor and control were indistinguishable (p = 1.0 and p = 0.65). Single-position
 patching: the donor flipped 0/50 in both directions, and in one direction (correct→incorrect)
@@ -173,12 +187,13 @@ combinations). *Why* that is — for example, whether a few large-magnitude "out
 dimensions carry the structure — is an untested hypothesis. Full results in
 [`docs/CAUSAL_AUDIT_FINDINGS.md`](docs/CAUSAL_AUDIT_FINDINGS.md), Section 7.
 
-## Why the C1 result can be trusted
+## How the C1 result was checked
 
 Bonferroni correction was applied across all 3 tested metrics — including an earlier
 24-comparison layer sweep, where a false positive at layer 10 did not survive correction
 and was correctly discarded. The reported effect size (rank-biserial r = -0.549) is
-medium-to-large, not borderline, and the raw per-task values were hand-verified against the
+medium-to-large, though the corrected p-value (0.042) is close to the threshold and n is
+small, and the raw per-task values were hand-verified against the
 printed statistics table before being trusted (see FINDINGS.md, "Bug #3"). The same
 discipline — pre-registering what counts as the test before running it, rather than
 searching configurations until one looks significant — governed the Phase P1 patching
@@ -348,9 +363,14 @@ same block's output (only a later layer's can).
   little truth signal for any direction to carry. The data was looked at twice (2 SD, then 32
   SD), so the second look used a stricter threshold (0.025). "No special effect detected" is
   not "no effect".
+- **No positive control yet:** the patching and steering code was checked mechanically (hooks verified on
+  tiny random models), but it has not been shown to recover a known causal effect, so a null here cannot
+  yet be told apart from a test that is insensitive to a real effect.
 
 ## Roadmap
 
+- **Positive control** — show the patching and steering code recovers a known effect (for example the
+  induction heads of pretrained GPT-2 small, Olsson et al. 2022), so that a null result is credible.
 - **Steering follow-ups** — probe-direction steering at layer 3 found no special effect
   (findings doc, Section 3.4). Still open: other layers, steering the "A:" boundary as well as
   the answer tokens, probing the other prefix positions that the range patch replaces, and
@@ -366,7 +386,9 @@ same block's output (only a later layer's can).
   only the largest-magnitude dimensions versus the rest to find out. Then extend the
   five-condition test to range patching and to GPT-2-medium's structure axis.
 - **Model scaling** — Baselines 1 and 2 (probe and causal tests) on Pythia / GPT-2-medium; so
-  far only the dimension-structure test has been run beyond GPT-2 small.
+  far only the dimension-structure test has been run beyond GPT-2 small. Small models may also be
+  near chance on TruthfulQA mc1, so a larger model (roughly 1B parameters or more) or a less
+  adversarial benchmark may be needed to get a model that is clearly above chance.
 - **Stretch: a short technical write-up** connecting C1 → P1 → Causal Audit as one coherent
   research arc, now that both baseline methods have a result.
 

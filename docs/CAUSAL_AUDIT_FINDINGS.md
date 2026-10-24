@@ -70,7 +70,8 @@ produced with this same causal-patching methodology — the first being
 `post_plateau_var` in Phase P1. They are separate signals but not independent
 replications: the two baselines share the model, benchmark, and patch position. Three structurally different signals, on
 two task families, all failing to demonstrate causal load-bearing status,
-is the emerging pattern this audit is built to test for.
+is the pattern found so far. It is not yet shown that these methods would detect a real
+causal effect if one existed (no positive control; Section 8).
 
 ---
 
@@ -409,7 +410,8 @@ methodology), this project has now found the same qualitative result
 twice: a signal that predicts model behavior without demonstrably causing
 it. Neither the literature-reported confidence-probing method tested here nor
 this project's own attention-derived metric showed a causal effect under
-these tests, on the evidence gathered so far.
+these tests, on the evidence gathered so far. None of the tests has a positive control, so a
+null cannot yet be told apart from a method that is insensitive to a real effect.
 
 ---
 
@@ -654,6 +656,10 @@ projection, so any patch there gets amplified; this was not tested.
 
 ## 8. Limitations
 
+- **No positive control.** The hook mechanisms were verified on tiny random models (patching changes
+  later positions, leaves earlier ones alone, a self-patch is a no-op), but the patching and steering
+  code has not been shown to recover a known causal effect (for example the induction heads of
+  pretrained GPT-2 small). Until it does, a null result may reflect an insensitive test.
 - **Single benchmark** (TruthfulQA mc1) — no cross-benchmark check yet
   (TriviaQA planned as a second benchmark).
 - **Single model for the baselines** (GPT-2 small) — Baselines 1 and 2 have not
@@ -714,23 +720,28 @@ projection, so any patch there gets amplified; this was not tested.
 
 ## 9. Next steps
 
-1. **Steering follow-ups.** Probe-direction steering at layer 3 found no special
+1. **Positive control.** Show that the patching and steering code recovers a known effect
+   (for example the induction heads of pretrained GPT-2 small), so that the nulls above are
+   interpretable. Do this before extending the audit to new models or layers.
+2. **Steering follow-ups.** Probe-direction steering at layer 3 found no special
    effect (Section 3.4). Still open: other layers; steering the "A:" boundary as well
    as the answer tokens; probing the other prefix positions that the range patch
-   replaces; repeating on a model that is clearly above chance on TruthfulQA.
-2. **Outlier-dimension test:** shuffle or preserve only the top-k
+   replaces; repeating on a model that is clearly above chance on TruthfulQA. Small models may also be
+   near chance on TruthfulQA mc1, so this may need a larger model (roughly 1B parameters or more) or
+   a less adversarial benchmark.
+3. **Outlier-dimension test:** shuffle or preserve only the top-k
    largest-magnitude dimensions versus the rest, to find out which dimensions
    carry the structure Section 7 found. If it holds, a dose-response version
    (interpolate from donor to noise).
-3. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
+4. Second benchmark (TriviaQA) for Baseline 1, to check whether the null
    result is specific to TruthfulQA's adversarial design or generalizes.
-4. Model scaling check (Pythia or GPT-2-medium) for Baselines 1 and 2.
-5. Larger pair counts (150-200) for the baseline causal tests, with
+5. Model scaling check (Pythia or GPT-2-medium) for Baselines 1 and 2.
+6. Larger pair counts (150-200) for the baseline causal tests, with
    confidence intervals, to tighten the "no effect detected" bounds.
-6. Optionally extend Baseline 1's causal test to additional layers, in case a
+7. Optionally extend Baseline 1's causal test to additional layers, in case a
    non-AUC-maximizing layer is causally load-bearing where layer 3 wasn't.
-7. (Lower priority) Structure axis on GPT-2-medium, a third architecture, and
+8. (Lower priority) Structure axis on GPT-2-medium, a third architecture, and
    range-patch mode for the five-condition test.
-8. Write up the full result (two baselines with no causal effect detected; the
+9. Write up the full result (two baselines with no causal effect detected; the
    dimension-structure finding explaining the noise-versus-donor pattern) as a
    short technical report connecting C1 → P1 → this audit.

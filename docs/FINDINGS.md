@@ -149,8 +149,8 @@ attention output replaced.
 **Conclusion:** at GPT-2 small's last layer, task correctness is robust to having the
 post-plateau attention-layer output partially or almost entirely replaced by a donor
 instance's. This is a materially stronger null than either pilot alone — the same result
-held whether one position or nearly the whole post-plateau span was patched. It is strong
-evidence that `post_plateau_var`, while a real and statistically significant correlate of
+held whether one position or nearly the whole post-plateau span was patched. It is
+evidence (within the power limit noted below) that `post_plateau_var`, while a real and statistically significant correlate of
 solving (C1), is **not causally driven by this layer's attention output** — at least not
 in a way this patching design can detect.
 
@@ -178,6 +178,8 @@ not run to go looking for a positive result.
   in Phase P1
 - Head-level ablation to identify which attention heads drive the `post_plateau_var` signal
 - Larger model comparisons (GPT-2 medium/large, other model families)
+- A positive control: show the patching pipeline recovers a known causal effect (e.g. known induction
+  heads in pretrained GPT-2 small), so that null results are interpretable
 - Broader seed coverage beyond base seed 42
 - ~~Extend the same causal test to published confidence-probing methods~~ — **done, see
   [`CAUSAL_AUDIT_FINDINGS.md`](CAUSAL_AUDIT_FINDINGS.md)**
