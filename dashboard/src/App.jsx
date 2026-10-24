@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis,
+  ScatterChart, Scatter, ZAxis, Cell, ReferenceLine,
 } from "recharts";
 import {
   Activity, FlaskConical, Terminal, Upload, AlertTriangle, CheckCircle2,
@@ -88,7 +88,27 @@ const JOURNEY = [
   {
     phase: "Phase P1", tag: "tested", date: "Causal activation patching",
     claim: "Does the post_plateau_var correlation reflect a cause of solving, or just a side effect of it?",
-    correction: "Two pre-registered patching pilots (final token only, then the full post-plateau span) both found 0/10 pairs showed any output shift when the donor's attention-layer output was spliced in \u2014 even patching nearly the whole post-plateau span. The hook mechanism was independently verified before trusting either result. Honest reading: at GPT-2 small's last layer, this is a correlate of solving, not a cause of it \u2014 scoped to that layer and component; earlier layers, other components, and full-generation effects remain untested.",
+    correction: "Two pre-registered patching pilots (final token only, then the full post-plateau span) both found 0/10 pairs showed any output shift when the donor's attention-layer output was spliced in \u2014 even patching nearly the whole post-plateau span. The hook mechanism was independently verified before trusting either result. No effect detected at GPT-2 small's last layer, in this component. With 10 pairs per pilot this rules out a true shift rate only above roughly 30%, so it is suggestive, not conclusive; earlier layers, other components, and full-generation effects remain untested.",
+  },
+  {
+    phase: "Phase A1", tag: "tested", date: "Causal audit: hidden-state probe",
+    claim: "A linear probe on GPT-2 small's hidden states predicts whether its answer to a TruthfulQA question is correct (n = 817).",
+    correction: "AUC about 0.78 at layer 3 (mean of 20 random 70/30 splits, SD 0.03). My first single split gave 0.83, which was a favorable draw, so 0.78 is the number to quote. Layers 3 to 9 are statistically indistinguishable. A surface-feature probe (question and answer length etc.) reaches 0.583, so the probe reads more than surface form. Base accuracy is only 27.7%.",
+  },
+  {
+    phase: "Phase A2", tag: "tested", date: "Causal audit: patching",
+    claim: "If the probe signal is part of why answers are correct, swapping a donor's hidden state into a recipient should change the recipient's answer more than swapping in random noise.",
+    correction: "Single-position patch: donor 0/50 flips in both directions, matched random control 6/50 and 16/50 (only 16/50 survives Bonferroni). Range patch: donor 10/50 vs control 11/50 (p = 1.0) and 30/50 vs 33/50 (p = 0.65). No effect detected. Caveat: the patched position (the \u201cA:\u201d boundary) carries only part of the signal (AUC about 0.59 there vs about 0.77 at the end of the answer), so the null is scoped to that position.",
+  },
+  {
+    phase: "Phase A3", tag: "tested", date: "Causal audit: steering",
+    claim: "Pushing the hidden state along the probe's own direction should change correctness more than pushing along random directions.",
+    correction: "At 2 SD (1.3% of the state norm) nothing moves. At 32 SD (20.3% of norm, a dose chosen because random directions already flip at least 5% of answers) the probe-direction slope is +0.0178 vs a random mean of about -0.002 (SD about 0.008): p = 0.098 against isotropic and 0.049 against covariance-matched directions, versus a pre-stated threshold of 0.025. Accuracy unchanged (27.5% vs 27.7%). Verdict: no special effect detected. The two looks use the same data and random directions, so they are not independent.",
+  },
+  {
+    phase: "Phase A4", tag: "tested", date: "Causal audit: dimension structure",
+    claim: "Random noise disrupts the model more than a real donor activation. Is that about topic, or about how values sit across dimensions?",
+    correction: "A donor with its dimensions shuffled behaves like noise on 10/10 layer-model combinations (GPT-2 small and Pythia-70m). No topic effect detected. This points to which value sits in which dimension. Whether a few outlier dimensions explain it is untested.",
   },
 ];
 
@@ -329,7 +349,7 @@ function CausalPanel({ pilots }) {
         C1 shows post_plateau_var correlates with solving. Phase P1 tested whether it's causal,
         by capturing the attention-layer output from a solved task's forward pass and splicing
         it into a failed task's forward pass (and vice versa), then checking whether the
-        model's answer shifted. Two pre-registered pilots, both null.
+        model's answer shifted. Two pre-registered pilots, no effect detected in either.
       </p>
       {pilots.map((pilot) => (
         <div className="causal-pilot" key={pilot.id}>
@@ -342,11 +362,11 @@ function CausalPanel({ pilots }) {
         </div>
       ))}
       <p style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.6, marginTop: 12, marginBottom: 0 }}>
-        <strong style={{ color: "var(--ink)" }}>Honest reading:</strong> at GPT-2 small's last
-        layer, task correctness is robust to this component being heavily altered &mdash; real
-        evidence post_plateau_var is a correlate of solving rather than a cause of it, at this
-        layer and via this component. Earlier layers, other components (MLP, individual heads),
-        and full-generation effects remain untested &mdash; scope stated explicitly rather than
+        <strong style={{ color: "var(--ink)" }}>Honest reading:</strong> no effect detected at GPT-2 small's last
+        layer, in this component. With 10 pairs per pilot, a true shift rate above roughly 30% is ruled out, but
+        smaller effects are not. Earlier layers, other components (MLP, individual heads),
+        and full-generation effects remain untested, and the method has no positive control yet
+        (see the Audit tab) &mdash; scope stated explicitly rather than
         implied. Full method in the Notebook tab and <code style={{ fontFamily: "var(--font-mono)" }}>docs/FINDINGS.md</code>.
       </p>
     </div>
@@ -365,9 +385,9 @@ function Overview({ headlineStats, p1Pilots }) {
             Across 30 task instances (5 seeds &times; 6 task types), <code style={{ color: "var(--induction)", fontFamily: "var(--font-mono)" }}>post_plateau_var</code> is
             the one of three Bonferroni-corrected metrics that separates solved from failed: solved
             instances show higher post-plateau entropy variance (0.0371 vs 0.0194), a medium&ndash;large
-            effect (r = &minus;0.549). Read plainly: the model doesn&rsquo;t settle into a calmer state when
+            effect (r = &minus;0.549), though the corrected p is close to the 0.05 threshold and n is small. Read plainly: the model doesn&rsquo;t settle into a calmer state when
             it succeeds &mdash; it stays more oscillatory, plausibly a signature of sustained pattern-matching.
-            Causal patching (below) found this is a correlate, not (yet demonstrated to be) a cause.
+            Causal patching (below) detected no causal effect, so treat it as a modest correlate; a follow-up audit (Audit tab) asks the same question of a hidden-state probe.
           </p>
           <span className="apta-pill">n(solved)=17 &middot; n(failed)=12</span>
         </div>
@@ -432,8 +452,141 @@ function Overview({ headlineStats, p1Pilots }) {
           <li>CPU-only run shown; not benchmarked for GPU throughput.</li>
           <li>One base seed (42) with 5 derived instances per task type.</li>
           <li><code style={{ fontFamily: "var(--font-mono)" }}>mod_arith_m10_d1</code> appears in both solved and failed groups across seeds &mdash; the separation is partly at the instance level, not purely between task types.</li>
+          <li>The C1 corrected p-value (0.042) is close to the threshold and n is small (29 usable instances), so this is a modest correlate, not an established effect.</li>
+          <li>No positive control yet: the patching and steering code was verified mechanically on tiny random models but has not been shown to recover a known mechanism, so a null cannot yet be told apart from an insensitive test.</li>
           <li>Causal patching (Phase P1) tested only the last layer's attention-layer output, scored via next-token prediction rather than full generation &mdash; earlier layers, other components, and full-generation effects remain untested.</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Causal audit results (hardcoded from docs/CAUSAL_AUDIT_FINDINGS.md; the
+// audit scripts do not write to data.json).
+// ---------------------------------------------------------------------------
+
+const AUDIT_AUC = [
+  { name: "Probe, end of answer", auc: 0.77, kind: "probe" },
+  { name: "Probe, layer 3 (20 splits)", auc: 0.78, kind: "probe" },
+  { name: "Probe at patched “A:” state", auc: 0.59, kind: "weak" },
+  { name: "Surface features only", auc: 0.583, kind: "weak" },
+  { name: "Attention concentration", auc: 0.54, kind: "weak" },
+];
+
+const AUDIT_PATCH = [
+  { test: "Single position, direction A", donor: "0/50", control: "6/50", p: "n/a", note: "donor never flips" },
+  { test: "Single position, direction B", donor: "0/50", control: "16/50", p: "n/a", note: "control survives Bonferroni" },
+  { test: "Range, direction A", donor: "10/50", control: "11/50", p: "1.00", note: "McNemar" },
+  { test: "Range, direction B", donor: "30/50", control: "33/50", p: "0.65", note: "McNemar" },
+];
+
+function AuditTab() {
+  const note = { fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.6, margin: "12px 0 0" };
+  const strong = { color: "var(--ink)" };
+  return (
+    <div className="apta-grid">
+      <div className="apta-card">
+        <span className="apta-pill"><Pin size={11} /> Causal audit &middot; GPT-2 small &middot; TruthfulQA mc1 (n = 817)</span>
+        <h2 style={{ fontFamily: "var(--font-display)", margin: "12px 0 8px", fontSize: 22 }}>
+          When an internal signal predicts correctness, is it part of why the answer is correct?
+        </h2>
+        <p style={{ ...note, marginTop: 0 }}>
+          A linear probe predicts whether GPT-2 small answers a question correctly. The audit then asks whether
+          that signal does any causal work, using donor-swap patching and steering along the probe direction,
+          each against matched random controls with success criteria stated before running.
+          Verdict so far: <strong style={strong}>no effect detected</strong>. These are limited nulls,
+          not proof of no effect (see the limits below).
+        </p>
+        <div className="stat-cards" style={{ marginTop: 16, marginBottom: 0 }}>
+          <div className="stat-card"><div className="m">probe AUC (layer 3)</div><div className="p" style={{ color: "var(--entropy)" }}>0.78</div><div className="m" style={{ marginTop: 6, marginBottom: 0 }}>mean of 20 random splits, SD 0.03</div></div>
+          <div className="stat-card"><div className="m">patching vs random</div><div className="p" style={{ color: "var(--ink-dim)" }}>no effect</div><div className="m" style={{ marginTop: 6, marginBottom: 0 }}>detected, 4 comparisons</div></div>
+          <div className="stat-card"><div className="m">steering, 32 SD</div><div className="p" style={{ color: "var(--ink-dim)" }}>p = 0.098</div><div className="m" style={{ marginTop: 6, marginBottom: 0 }}>vs threshold 0.025</div></div>
+          <div className="stat-card"><div className="m">model accuracy</div><div className="p" style={{ color: "var(--induction)" }}>27.7%</div><div className="m" style={{ marginTop: 6, marginBottom: 0 }}>near chance on this benchmark</div></div>
+        </div>
+      </div>
+
+      <div className="apta-card">
+        <p className="apta-section-title"><Activity size={16} color="var(--entropy)" /> What predicts correctness (AUC)</p>
+        <p className="apta-section-sub">0.5 is chance. The probe reads more than surface form, but the state that was patched carries only part of its signal.</p>
+        <div style={{ width: "100%", height: 230 }}>
+          <ResponsiveContainer>
+            <BarChart data={AUDIT_AUC} layout="vertical" margin={{ left: 10, right: 24, top: 4, bottom: 4 }}>
+              <CartesianGrid stroke="#2a2f3b" horizontal={false} />
+              <XAxis type="number" domain={[0.4, 0.9]} tick={{ fill: "#8b93a3", fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={190} tick={{ fill: "#8b93a3", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "#20242e", border: "1px solid #2a2f3b", fontSize: 12 }} />
+              <ReferenceLine x={0.5} stroke="#e2665b" strokeDasharray="4 4" />
+              <Bar dataKey="auc" radius={[0, 4, 4, 0]}>
+                {AUDIT_AUC.map((d) => <Cell key={d.name} fill={d.kind === "probe" ? "#5ec3e0" : "#8b93a3"} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <p style={note}>
+          <strong style={strong}>Note:</strong> my first single train/test split gave 0.83, a favorable draw; 0.78 is the
+          20-split mean. Layers 3 to 9 are statistically indistinguishable. At the &ldquo;A:&rdquo; boundary where patching
+          happens, AUC is about 0.59 (permutation p = 0.010), versus about 0.77 at the end of the answer.
+        </p>
+      </div>
+
+      <div className="apta-card">
+        <p className="apta-section-title"><GitBranch size={16} color="var(--ink-dim)" /> Patching: donor vs matched random control</p>
+        <p className="apta-section-sub">Answers flipped out of 50 pairs. A real causal role would make the donor flip answers more than random noise does.</p>
+        <table className="apta-table">
+          <thead><tr><th>Test</th><th className="num">donor flips</th><th className="num">control flips</th><th className="num">p</th><th>Note</th></tr></thead>
+          <tbody>
+            {AUDIT_PATCH.map((r) => (
+              <tr key={r.test}>
+                <td style={{ color: "var(--ink)" }}>{r.test}</td>
+                <td className="num">{r.donor}</td>
+                <td className="num">{r.control}</td>
+                <td className="num">{r.p}</td>
+                <td><span className="apta-tag tag-nosig">{r.note}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={note}>
+          Random noise disrupts the model about as much as, or more than, the real donor. No effect detected.
+        </p>
+      </div>
+
+      <div className="apta-card">
+        <p className="apta-section-title"><Activity size={16} color="var(--induction)" /> Steering along the probe direction</p>
+        <p className="apta-section-sub">Slope of correctness probability against steering strength, probe direction vs random directions.</p>
+        <table className="apta-table">
+          <thead><tr><th>Dose</th><th className="num">probe slope</th><th className="num">random mean</th><th className="num">p</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td style={{ color: "var(--ink)" }}>2 SD (1.3% of norm)</td><td className="num">&mdash;</td><td className="num">&mdash;</td><td className="num">&mdash;</td><td><span className="apta-tag tag-nosig">nothing moves</span></td></tr>
+            <tr><td style={{ color: "var(--ink)" }}>32 SD (20.3% of norm)</td><td className="num">+0.0178</td><td className="num">about &minus;0.002</td><td className="num">0.098 iso / 0.049 cov</td><td><span className="apta-tag tag-nosig">no special effect detected</span></td></tr>
+          </tbody>
+        </table>
+        <p style={note}>
+          Pre-stated threshold was p &lt; 0.025. Accuracy unchanged (27.5% vs 27.7%). The 32 SD dose was chosen because
+          random directions already flip at least 5% of answers there. The isotropic and covariance-matched looks use the same data and
+          random directions, so they are not independent.
+        </p>
+      </div>
+
+      <div className="apta-card">
+        <p className="apta-section-title"><Beaker size={16} color="var(--induction)" /> Side finding: why noise beats a real activation</p>
+        <p style={{ ...note, marginTop: 0 }}>
+          A donor with its dimensions shuffled behaves like noise on 10/10 layer-model combinations (GPT-2 small and
+          Pythia-70m), and no topic effect was detected. The disruption tracks which value sits in which dimension. Whether a
+          few outlier dimensions explain it has not been tested.
+        </p>
+      </div>
+
+      <div className="apta-card" style={{ borderColor: "rgba(240,169,74,.35)" }}>
+        <p className="apta-section-title"><AlertTriangle size={16} color="var(--induction)" /> Limits and what comes next</p>
+        <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ink-dim)", fontSize: 13, lineHeight: 1.8 }}>
+          <li><strong style={strong}>No positive control yet.</strong> Hooks were checked on tiny random models only. Next: show the code recovers known induction heads in pretrained GPT-2 small, so a null can be told apart from an insensitive test.</li>
+          <li>GPT-2 small answers only 27.7% correctly, near chance. A model clearly above chance (possibly about 1B parameters or more, or a less adversarial benchmark) is needed before a null is convincing.</li>
+          <li>Patching targets a state that carries only part of the probe signal (AUC about 0.59 vs 0.77).</li>
+          <li>One model, one benchmark. Attention-concentration baseline is weak (AUC 0.54), so its causal null carries less weight.</li>
+        </ul>
+        <p style={note}>Full write-up in <code style={{ fontFamily: "var(--font-mono)" }}>docs/CAUSAL_AUDIT_FINDINGS.md</code>.</p>
       </div>
     </div>
   );
@@ -712,8 +865,9 @@ export default function AttentionPhaseDashboard() {
 
   const tabs = [
     { id: "overview", label: "Finding", chan: "CH1", icon: Activity },
-    { id: "journey", label: "Notebook", chan: "CH2", icon: FlaskConical },
-    { id: "run", label: "Run", chan: "CH3", icon: Terminal },
+    { id: "audit", label: "Audit", chan: "CH2", icon: GitBranch },
+    { id: "journey", label: "Notebook", chan: "CH3", icon: FlaskConical },
+    { id: "run", label: "Run", chan: "CH4", icon: Terminal },
   ];
   return (
     <div className="apta">
@@ -724,8 +878,8 @@ export default function AttentionPhaseDashboard() {
           <h1 className="apta-title">Within-Context Attention Phase Transition Analyzer</h1>
           <p className="apta-sub">
             A hypothesis-testing pipeline, not a visualization tool: synthetic tasks run through GPT-2, attention-derived
-            metrics extracted per token position, solved vs. failed compared with a properly powered, multiple-comparisons-corrected test,
-            then causally tested via activation patching.
+            metrics extracted per token position, solved vs. failed compared with a multiple-comparisons-corrected test,
+            then causally tested via activation patching and probe-direction steering.
           </p>
           <span className="apta-repo">
             <a href="https://github.com/Tarun995/Within-Context-Attention-Phase-Transition-Analyzer" target="_blank" rel="noreferrer">
@@ -744,12 +898,13 @@ export default function AttentionPhaseDashboard() {
         </div>
 
         {tab === "overview" && <Overview headlineStats={headlineStats} p1Pilots={p1Pilots} />}
+        {tab === "audit" && <AuditTab />}
         {tab === "journey" && <Journey />}
         {tab === "run" && <RunTab initialData={initialRunData} />}
 
         <div className="apta-footer">
           <span>MIT licensed &middot; GPT-2 small (117M) &middot; single base seed (42)</span>
-          <span>tests/ &middot; 60+ regression + patch-mechanism tests</span>
+          <span>tests/ &middot; about 100 regression, patch and steering tests</span>
         </div>
       </div>
     </div>
