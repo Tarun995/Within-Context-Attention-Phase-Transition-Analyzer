@@ -231,7 +231,7 @@ function Styles() {
       .apta-grid{ display:grid; gap:16px; }
 
       /* Hero / scope trace */
-      .apta-hero{ display:grid; grid-template-columns:1.1fr 1fr; gap:24px; margin-bottom:26px; }
+      .apta-hero{ display:grid; grid-template-columns:1.1fr 1fr; gap:24px; margin-bottom:26px; align-items:start; }
       @media (max-width:860px){ .apta-hero{ grid-template-columns:1fr; } }
       .apta-hero-stat{ font-family:var(--font-mono); font-size:44px; font-weight:600; color:var(--verified); line-height:1; margin:10px 0 6px; }
       .apta-hero h2{ font-family:var(--font-display); font-size:20px; margin:0 0 12px; line-height:1.3; font-weight:600; }
@@ -337,6 +337,34 @@ function ScopeHero() {
         <text x="8" y="14" fill="var(--entropy)" fontSize="9" fontFamily="JetBrains Mono, monospace">entropy</text>
         <text x="8" y="140" fill="var(--induction)" fontSize="9" fontFamily="JetBrains Mono, monospace">induction envelope</text>
       </svg>
+      <p style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, margin: "10px 2px 0" }}>
+        Stylized illustration of the idea, not real model output.
+      </p>
+    </div>
+  );
+}
+
+function StatusCard() {
+  const rows = [
+    ["C1 correlate", "p = 0.042, modest, small n"],
+    ["P1 patching", "no effect detected (0/10, 0/10)"],
+    ["Audit: probe", "AUC 0.78 on TruthfulQA"],
+    ["Audit: patching, steering", "no effect detected"],
+    ["Positive control", "not done yet"],
+  ];
+  return (
+    <div className="apta-card" style={{ marginTop: 16 }}>
+      <p className="apta-section-title"><Pin size={14} color="var(--ink-dim)" /> Where things stand</p>
+      <table className="apta-table">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}><td style={{ color: "var(--ink)" }}>{k}</td><td>{v}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ fontSize: 12, color: "var(--ink-dim)", lineHeight: 1.6, margin: "10px 0 0" }}>
+        Details in the Audit tab.
+      </p>
     </div>
   );
 }
@@ -391,7 +419,10 @@ function Overview({ headlineStats, p1Pilots }) {
           </p>
           <span className="apta-pill">n(solved)=17 &middot; n(failed)=12</span>
         </div>
-        <ScopeHero />
+        <div>
+          <ScopeHero />
+          <StatusCard />
+        </div>
       </div>
 
       <CausalPanel pilots={p1Pilots} />
